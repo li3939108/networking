@@ -204,13 +204,20 @@ int main(int argc, char *argv[])
 			// JOIN request
 			if(((ntohs(*vrs_ty))&0x7F) == 2)
 			{
-				if(usrns[atoi(argv[3])-1]!=NULL) {
-                                printf("server: MAX CLIENTS of %d reached. Sorry Try again later!\n",atoi(argv[3]));
-                                close(i); // bye!
-                                FD_CLR(i, &master); // remove from master set
+				present=1;
+				//Checking number of clients in room
+				for(j=0 ; j < atoi(argv[3]) ;j++) {
+					if(usrns[j]==NULL){
+						present=0;
+						break;
+					}
+				}
+				if(present) {
+	                                printf("server: MAX CLIENTS of %d reached. Sorry Try again later!\n",atoi(argv[3]));
+	                                close(i); // bye!
+        	                        FD_CLR(i, &master); // remove from master set
 	                   	}
                         	else {
-				present = 0;
                                 for(j=0 ; j < atoi(argv[3]) ;j++) {
                                         if(usrns[j]!=NULL && strncmp(&buf[8],usrns[j],numbytes-8)==0) {
                                                 printf("server: USERNAME(%s) already present!. Try again\n",usrns[j]);
