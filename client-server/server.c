@@ -23,13 +23,37 @@
 
 struct Attr{
 uint16_t attrib_type,attrib_len;
-char *payload;
+char payload[MAXDATASIZE];
 };
 
 struct SBCP{
 uint16_t vrsn_type, frame_len;
 struct Attr at[MAXATTRIBUTES];
 };
+
+//General htons for struct
+void htons_struct(struct SBCP *m)
+{
+        int k;
+        m->vrsn_type = htons (m->vrsn_type);
+        for(k=0;k<MAXATTRIBUTES;k++) {
+                m->at[k].attrib_type = htons (m->at[k].attrib_type);
+                m->at[k].attrib_len = htons (m->at[k].attrib_len);
+        }
+        m->frame_len = htons (m->frame_len);
+}
+
+//General ntohs for struct
+void ntohs_struct(struct SBCP *m)
+{
+        int k;
+        m->vrsn_type = ntohs (m->vrsn_type);
+        for(k=0;k<MAXATTRIBUTES;k++) {
+                m->at[k].attrib_type = ntohs (m->at[k].attrib_type);
+                m->at[k].attrib_len = ntohs (m->at[k].attrib_len);
+        }
+        m->frame_len = ntohs (m->frame_len);
+}
 
 // get sockaddr, IPv4 or IPv6:
 void *get_in_addr(struct sockaddr *sa)
@@ -177,7 +201,7 @@ int main(int argc, char *argv[])
                         // we got some data from a client
 			buf[numbytes] = '\0';
 			uint16_t *vrs_ty = (uint16_t *)&buf;
-			//printf(" %d %x %x %x\n", ntohs(msg_buff->at[0].attrib_type), &msg_buff->at[0].attrib_len, &msg_buff->at[0].payload, &msg_buff->at[1].attrib_type);
+			// JOIN request
 			if(((ntohs(*vrs_ty))&0x7F) == 2)
 			{
 				if(usrns[atoi(argv[3])-1]!=NULL) {
@@ -202,11 +226,12 @@ int main(int argc, char *argv[])
 				printf("server: %s JOINED the chat room\n",usrns[i-sockfd-1]);	
 				}
 				}
-			}	
-			else {
+			}
+			// Chat Message request	
+			else if(((ntohs(*vrs_ty))&0x7F) == 4) {
 				printf("%s: %s \n",usrns[i-sockfd-1],&buf[8]);
 
-/*                        for(j = 0; j <= sockmax; j++) {
+                        for(j = 0; j <= sockmax; j++) {
                             	// send to everyone!
                         	if (FD_ISSET(j, &master)) {
                                 // except the listener and ourselves
@@ -214,28 +239,17 @@ int main(int argc, char *argv[])
 				    struct SBCP msg;
 				    msg.vrsn_type = (3<<7)|(3);
 				    msg.at[0].attrib_type = 2;
-				    msg.at[0].payload = malloc(strlen(usrns[i-sockfd-1]));
 				    strcpy(msg.at[0].payload,usrns[i-sockfd-1]); //username initially to join
 				    msg.at[0].attrib_len = strlen(msg.at[0].payload)+4;
 				    msg.frame_len = msg.at[0].attrib_len + 4;
 
 				    msg.at[1].attrib_type = 4;
-				    msg.at[1].payload = malloc(strlen(msg_buff->at[0].payload));
-				    strcpy(msg.at[1].payload,msg_buff->at[0].payload);	
+				    strcpy(msg.at[1].payload,&buf[8]);	
 				    msg.at[1].attrib_len = strlen(msg.at[1].payload)+4;
 				    msg.frame_len += msg.at[1].attrib_len ;
 				
-				    //memcpy(msg.at[0].payload, (char *)&msg.at[1], msg.at[1].attrib_len);
-
-				    msg.vrsn_type = htons (msg.vrsn_type);
-				    msg.frame_len = htons (msg.frame_len);
-
-				    for(k=0;k<MAXATTRIBUTES;k++) {
-                                    msg.at[k].attrib_type = htons (msg.at[k].attrib_type);
-                                    msg.at[k].attrib_len = htons (msg.at[k].attrib_len);
-				    }
-				    
-				    printf("%x %x %x %s \n",&msg.at[0].payload,&msg.at[1].attrib_type,&msg.at[1].attrib_len,msg.at[1].payload);
+				    htons_struct(&msg);
+	
 				    //Sending Chat text and username (FWD)
 				    if (send(j, (char *)&msg, sizeof(msg), 0) == -1){
 				    printf("Error sending\n");
@@ -244,7 +258,6 @@ int main(int argc, char *argv[])
     				}
 				}
 			}
-*/			
 			}
 			}
 			}
