@@ -16,9 +16,10 @@
 #include <signal.h>
 
 #define BACKLOG 10     // how many pending connections queue will hold
-#define MAXDATASIZE 512
 
+#define MAXDATASIZE 512
 #define MAXATTRIBUTES 2
+
 //Frame(message) contents of the SBCP protocol
 
 struct Attr{
@@ -55,7 +56,7 @@ void ntohs_struct(struct SBCP *m)
         m->frame_len = ntohs (m->frame_len);
 }
 
-//Send Offline/Online message to everyon
+//Send Offline/Online message to everyone
 void send_to_everyone(int i, int sockfd, int sockmax, int msg_type, fd_set master, char *usrns[]) {
 	int j;
 	for(j = 0; j <= sockmax; j++) {
@@ -72,7 +73,7 @@ void send_to_everyone(int i, int sockfd, int sockmax, int msg_type, fd_set maste
 
                         htons_struct(&msg);
 
-                        //Sending Chat text and username (FWD)
+                        //OFFLINE/ONLINE
                         if (send(j, (char *)&msg, ntohs(msg.frame_len), 0) == -1){
 	                        printf("Error sending\n");
                                 perror("send");
@@ -216,139 +217,140 @@ int main(int argc, char *argv[])
 	for(i=0; i<=sockmax; i++) {
 		if(FD_ISSET(i, &read_fds)) {
 			if(i == sockfd) {
-			//Accept the new connection
-		        sin_size = sizeof their_addr;
-		        new_fd =accept(sockfd, (struct sockaddr *)&their_addr, &sin_size);
-			if(new_fd == -1) {
-			        perror("accept");
-			        continue;
-        		}
-			else {
-				printf("server: Adding to master %d\n",new_fd);
-				FD_SET(new_fd, &master); //Adding to master set
-				if(new_fd > sockmax) {
-					sockmax = new_fd;
+				//Accept the new connection
+				sin_size = sizeof their_addr;
+				new_fd =accept(sockfd, (struct sockaddr *)&their_addr, &sin_size);
+				if(new_fd == -1) {
+					perror("accept");
+					continue;
 				}
+				else {
+					printf("server: Adding to master %d\n",new_fd);
+					FD_SET(new_fd, &master); //Adding to master set
+					if(new_fd > sockmax) {
+						sockmax = new_fd;
+					}
 
-		        inet_ntop(their_addr.ss_family, get_in_addr((struct sockaddr *)&their_addr), s, sizeof s);
-		        printf("server: %d got connection from %s\n", sockfd,s);	
-			}
+				inet_ntop(their_addr.ss_family, get_in_addr((struct sockaddr *)&their_addr), s, sizeof s);
+				printf("server: %d got connection from %s\n", sockfd,s);	
+				}
            		}
 			
 			else {
-                    	// handle data from a client
-                    	if ((numbytes = recv(i, buf, sizeof buf, 0)) <= 0) {
-                        // got error or connection closed by client
-                                printf("server: %s LEFT the chat room \n",usrns[i-sockfd-1]);
-                        	if (numbytes == 0) {
-	                        // connection closed
-                        	printf("server: socket %d hung up! Nothing received\n", i);
-                        	} 
-				else {
-				printf("server: some error receiving \n");
-                            	perror("recv");
-                        	}
-				//Sending Offline Message to everyone
-                                send_to_everyone(i, sockfd, sockmax, 6, master, usrns);
+		            	// handle data from a client
+		            	if ((numbytes = recv(i, buf, sizeof buf, 0)) <= 0) {
+		                        // got error or connection closed by client
+		                        printf("server: %s LEFT the chat room \n",usrns[i-sockfd-1]);
+		                	if (numbytes == 0) {
+					        // connection closed
+				        	printf("server: socket %d hung up! Nothing received\n", i);
+		                	} 
+					else {
+						printf("server: some error receiving \n");
+				            	perror("recv");
+		                	}
+					//Sending Offline Message to everyone
+		                        send_to_everyone(i, sockfd, sockmax, 6, master, usrns);
 
-				free(usrns[i-sockfd-1]);
-				usrns[i-sockfd-1]=NULL;
-                        	close(i); // bye!
-                        	FD_CLR(i, &master); // remove from master set
-                    	} 
-			else {
-                        // we got some data from a client
-			buf[numbytes] = '\0';
-			uint16_t *vrs_ty = (uint16_t *)&buf;
-			// JOIN request
-			if(((ntohs(*vrs_ty))&0x7F) == 2)
-			{
-				present=1;
-				char reason[50];
-				//Checking number of clients in room
-				for(j=0 ; j < atoi(argv[3]) ;j++) {
-					if(usrns[j]==NULL){
-						present=0;
-						break;
+					free(usrns[i-sockfd-1]);
+					usrns[i-sockfd-1]=NULL;
+		                	close(i); // bye!
+		                	FD_CLR(i, &master); // remove from master set
+		            	} 
+				else {
+				        // we got some data from a client
+					buf[numbytes] = '\0';
+					uint16_t *vrs_ty = (uint16_t *)&buf;
+					// JOIN request
+					if(((ntohs(*vrs_ty))&0x7F) == 2)
+					{
+						present=1;
+						char reason[50];
+						//Checking number of clients in room
+						for(j=0 ; j < atoi(argv[3]) ;j++) {
+							if(usrns[j]==NULL){
+								present=0;
+								break;
+							}
+						}
+
+						if(present) {
+					                printf("server: MAX CLIENTS of %d reached. Sorry Try again later!\n",atoi(argv[3]));
+							strcpy(reason,"MAX CLIENTS reached. Sorry Try again later!"); 
+					   	}
+				        	else {
+						        for(j=0 ; j < atoi(argv[3]) ;j++) {
+						                if(usrns[j]!=NULL && strncmp(&buf[8],usrns[j],numbytes-8)==0) {
+						                        printf("server: USERNAME(%s) already present!. Try again\n",usrns[j]);
+									present=1;
+									strcpy(reason,"USERNAME already exists. Try another one!");
+									break;
+								}
+							}
+							// No problems and client can join
+							if(!present) {				
+								usrns[i-sockfd-1]=(char*) malloc(numbytes-8);
+								strncpy(usrns[i-sockfd-1],&buf[8],numbytes-8);
+								printf("server: %s JOINED the chat room\n",usrns[i-sockfd-1]);	
+								//ACK send 
+								send_ack (i, usrns, atoi(argv[3]));	
+								//Sending Online Message to everyone
+								send_to_everyone(i, sockfd, sockmax, 8, master, usrns);
+							}
+						}
+						//NAK send
+						if(present) {
+						    struct SBCP msg;
+				                    msg.vrsn_type = (3<<7)|(5);
+				                    msg.at[0].attrib_type = 1;
+				                    strcpy(msg.at[0].payload,reason); //Reason you it can't join
+				                    msg.at[0].attrib_len = strlen(msg.at[0].payload)+4;
+				                    msg.frame_len = msg.at[0].attrib_len + 4;
+
+						    htons_struct(&msg);
+						    //Sending NAK reason
+				                    if (send(i, (char *)&msg, ntohs(msg.frame_len), 0) == -1){
+						            printf("Error sending\n");
+						            perror("send");
+				                    }
+		   				    close(i); // bye!
+				                    FD_CLR(i, &master); // remove from master set
+						}				
+				
+					}
+					// Chat Message request	
+					else if(((ntohs(*vrs_ty))&0x7F) == 4) {
+						printf("%s: %s \n",usrns[i-sockfd-1],&buf[8]);
+
+						for(j = 0; j <= sockmax; j++) {
+						    	// send to everyone!
+							if (FD_ISSET(j, &master)) {
+								// except the listener and ourselves
+								if ((j > sockfd) && (j != i)) {
+								    struct SBCP msg;
+								    msg.vrsn_type = (3<<7)|(3);
+								    msg.at[0].attrib_type = 2;
+								    strcpy(msg.at[0].payload,usrns[i-sockfd-1]); //username initially to join
+								    msg.at[0].attrib_len = strlen(msg.at[0].payload)+4;
+								    msg.frame_len = msg.at[0].attrib_len + 4;
+
+								    msg.at[1].attrib_type = 4;
+								    strcpy(msg.at[1].payload,&buf[8]);	
+								    msg.at[1].attrib_len = strlen(msg.at[1].payload)+4;
+								    msg.frame_len += msg.at[1].attrib_len ;
+				
+								    htons_struct(&msg);
+	
+								    //Sending Chat text and username (FWD)
+								    if (send(j, (char *)&msg, sizeof(msg), 0) == -1){
+									    printf("Error sending\n");
+									    perror("send");
+							    	    }
+				    				}
+							}
+						}
 					}
 				}
-				if(present) {
-	                                printf("server: MAX CLIENTS of %d reached. Sorry Try again later!\n",atoi(argv[3]));
-					strcpy(reason,"MAX CLIENTS reached. Sorry Try again later!"); 
-	                   	}
-                        	else {
-                                for(j=0 ; j < atoi(argv[3]) ;j++) {
-                                        if(usrns[j]!=NULL && strncmp(&buf[8],usrns[j],numbytes-8)==0) {
-                                                printf("server: USERNAME(%s) already present!. Try again\n",usrns[j]);
-						present=1;
-						strcpy(reason,"USERNAME already exists. Try another one!");
-						break;
-                		        }
-				}
-				// No problems and client can join
-				if(!present) {				
-					usrns[i-sockfd-1]=(char*) malloc(numbytes-8);
-					strncpy(usrns[i-sockfd-1],&buf[8],numbytes-8);
-					printf("server: %s JOINED the chat room\n",usrns[i-sockfd-1]);	
-					//ACK send 
-					send_ack (i, usrns, atoi(argv[3]));	
-					//Sending Online Message to everyone
-					send_to_everyone(i, sockfd, sockmax, 8, master, usrns);
-	                        }
-				}
-				//NAK send
-				if(present) {
-				    struct SBCP msg;
-                                    msg.vrsn_type = (3<<7)|(5);
-                                    msg.at[0].attrib_type = 1;
-                                    strcpy(msg.at[0].payload,reason); //Reason you it can't join
-                                    msg.at[0].attrib_len = strlen(msg.at[0].payload)+4;
-                                    msg.frame_len = msg.at[0].attrib_len + 4;
-
-				    htons_struct(&msg);
-				    //Sending NAK reason
-                                    if (send(i, (char *)&msg, ntohs(msg.frame_len), 0) == -1){
-                                    printf("Error sending\n");
-                                    perror("send");
-                                    }
-   				    close(i); // bye!
-                                    FD_CLR(i, &master); // remove from master set
-				}				
-				
-			}
-			// Chat Message request	
-			else if(((ntohs(*vrs_ty))&0x7F) == 4) {
-			printf("%s: %s \n",usrns[i-sockfd-1],&buf[8]);
-
-                        for(j = 0; j <= sockmax; j++) {
-                            	// send to everyone!
-                        	if (FD_ISSET(j, &master)) {
-                                // except the listener and ourselves
-                                if ((j > sockfd) && (j != i)) {
-				    struct SBCP msg;
-				    msg.vrsn_type = (3<<7)|(3);
-				    msg.at[0].attrib_type = 2;
-				    strcpy(msg.at[0].payload,usrns[i-sockfd-1]); //username initially to join
-				    msg.at[0].attrib_len = strlen(msg.at[0].payload)+4;
-				    msg.frame_len = msg.at[0].attrib_len + 4;
-
-				    msg.at[1].attrib_type = 4;
-				    strcpy(msg.at[1].payload,&buf[8]);	
-				    msg.at[1].attrib_len = strlen(msg.at[1].payload)+4;
-				    msg.frame_len += msg.at[1].attrib_len ;
-				
-				    htons_struct(&msg);
-	
-				    //Sending Chat text and username (FWD)
-				    if (send(j, (char *)&msg, sizeof(msg), 0) == -1){
-				    printf("Error sending\n");
-				    perror("send");
-			    	    }
-    				}
-				}
-			}
-			}
-			}
 			}
 		}
 	}

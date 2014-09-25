@@ -14,10 +14,9 @@
 
 #include <arpa/inet.h>
 
-#define PORT "23340" // the port client will be connecting to 
-
 #define MAXDATASIZE 512 // max number of bytes we can get at once 
-#define MAXATTRIBUTES 2
+#define MAXATTRIBUTES 2 //max number of attributes that will be sent in our implementation
+
 //Frame(message) contents of the SBCP protocol
 
 struct Attr{
@@ -129,6 +128,7 @@ int main(int argc, char *argv[])
     msg.frame_len = msg.at[0].attrib_len + 4; 
     
     htons_struct(&msg);
+    //JOIN
     if (send(sockfd, (char *)&msg, sizeof (msg), 0) == -1){
         printf("Error sending\n");
         perror("send");
@@ -163,6 +163,7 @@ int main(int argc, char *argv[])
 	msg.frame_len = msg.at[0].attrib_len + 4;
 
 	htons_struct(&msg);
+	//SEND
 	if (send(sockfd, (char *)&msg, sizeof(msg), 0) == -1){
         printf("Error sending\n");
         perror("send");
