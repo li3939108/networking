@@ -55,6 +55,62 @@ void ntohs_struct(struct SBCP *m)
         m->frame_len = ntohs (m->frame_len);
 }
 
+//Send Offline/Online message to everyon
+void send_to_everyone(int i, int sockfd, int sockmax, int msg_type, fd_set master, char *usrns[]) {
+	int j;
+	for(j = 0; j <= sockmax; j++) {
+        	// send to everyone!
+                if (FD_ISSET(j, &master)) {
+                // except the listener and ourselves
+                if ((j > sockfd) && (j != i)) {
+                	struct SBCP msg;
+                        msg.vrsn_type = (3<<7)|(msg_type);
+                        msg.at[0].attrib_type = 2;
+                        strcpy(msg.at[0].payload,usrns[i-sockfd-1]); //username initially to join
+                        msg.at[0].attrib_len = strlen(msg.at[0].payload)+4;
+                        msg.frame_len = msg.at[0].attrib_len + 4;
+
+                        htons_struct(&msg);
+
+                        //Sending Chat text and username (FWD)
+                        if (send(j, (char *)&msg, ntohs(msg.frame_len), 0) == -1){
+	                        printf("Error sending\n");
+                                perror("send");
+                        }
+                 }
+                 }
+ 	 }
+}
+
+//Send ACK 
+void send_ack(int i, char *usrns[], int usrns_num) {
+	struct SBCP msg;
+	unsigned char client_count = 0;
+	int k;
+        msg.vrsn_type = (3<<7)|(7);
+        msg.at[0].attrib_type = 4;
+        memset(msg.at[0].payload, '\0', sizeof(msg.at[0].payload));
+        memset(msg.at[0].payload, ' ', 2);
+        for(k=0; k<usrns_num;k++) {
+        	if(usrns[k]!=NULL) {
+                	client_count++;
+                        strcpy(&msg.at[0].payload[strlen(msg.at[0].payload)],usrns[k]);
+                        memset(&msg.at[0].payload[strlen(msg.at[0].payload)], ' ', 2);
+                }
+        }
+        msg.at[0].payload[0] = client_count;
+
+        msg.at[0].attrib_len = strlen(msg.at[0].payload)+4;
+        msg.frame_len = msg.at[0].attrib_len + 4;
+
+        htons_struct(&msg);
+        //Sending ACK
+        if (send(i, (char *)&msg, ntohs(msg.frame_len), 0) == -1){
+	        printf("Error sending\n");
+                perror("send");
+        }
+}
+
 // get sockaddr, IPv4 or IPv6:
 void *get_in_addr(struct sockaddr *sa)
 {
@@ -73,7 +129,7 @@ int main(int argc, char *argv[])
     socklen_t sin_size;
     int yes=1;
     char s[INET6_ADDRSTRLEN];
-    int rv,i,j,k;
+    int rv,i,j;
     int numbytes;
     char present,buf[MAXDATASIZE];
     char *usrns[atoi(argv[3])];
@@ -192,6 +248,9 @@ int main(int argc, char *argv[])
 				printf("server: some error receiving \n");
                             	perror("recv");
                         	}
+				//Sending Offline Message to everyone
+                                send_to_everyone(i, sockfd, sockmax, 6, master, usrns);
+
 				free(usrns[i-sockfd-1]);
 				usrns[i-sockfd-1]=NULL;
                         	close(i); // bye!
@@ -205,6 +264,7 @@ int main(int argc, char *argv[])
 			if(((ntohs(*vrs_ty))&0x7F) == 2)
 			{
 				present=1;
+				char reason[50];
 				//Checking number of clients in room
 				for(j=0 ; j < atoi(argv[3]) ;j++) {
 					if(usrns[j]==NULL){
@@ -214,29 +274,51 @@ int main(int argc, char *argv[])
 				}
 				if(present) {
 	                                printf("server: MAX CLIENTS of %d reached. Sorry Try again later!\n",atoi(argv[3]));
-	                                close(i); // bye!
-        	                        FD_CLR(i, &master); // remove from master set
+					strcpy(reason,"MAX CLIENTS reached. Sorry Try again later!"); 
 	                   	}
                         	else {
                                 for(j=0 ; j < atoi(argv[3]) ;j++) {
                                         if(usrns[j]!=NULL && strncmp(&buf[8],usrns[j],numbytes-8)==0) {
                                                 printf("server: USERNAME(%s) already present!. Try again\n",usrns[j]);
-                                                close(i); // bye!
-		                                FD_CLR(i, &master); // remove from master set
 						present=1;
+						strcpy(reason,"USERNAME already exists. Try another one!");
 						break;
                 		        }
 				}
+				// No problems and client can join
 				if(!present) {				
-				usrns[i-sockfd-1]=(char*) malloc(numbytes-8);
-				strncpy(usrns[i-sockfd-1],&buf[8],numbytes-8);
-				printf("server: %s JOINED the chat room\n",usrns[i-sockfd-1]);	
+					usrns[i-sockfd-1]=(char*) malloc(numbytes-8);
+					strncpy(usrns[i-sockfd-1],&buf[8],numbytes-8);
+					printf("server: %s JOINED the chat room\n",usrns[i-sockfd-1]);	
+					//ACK send 
+					send_ack (i, usrns, atoi(argv[3]));	
+					//Sending Online Message to everyone
+					send_to_everyone(i, sockfd, sockmax, 8, master, usrns);
+	                        }
 				}
-				}
+				//NAK send
+				if(present) {
+				    struct SBCP msg;
+                                    msg.vrsn_type = (3<<7)|(5);
+                                    msg.at[0].attrib_type = 1;
+                                    strcpy(msg.at[0].payload,reason); //Reason you it can't join
+                                    msg.at[0].attrib_len = strlen(msg.at[0].payload)+4;
+                                    msg.frame_len = msg.at[0].attrib_len + 4;
+
+				    htons_struct(&msg);
+				    //Sending NAK reason
+                                    if (send(i, (char *)&msg, ntohs(msg.frame_len), 0) == -1){
+                                    printf("Error sending\n");
+                                    perror("send");
+                                    }
+   				    close(i); // bye!
+                                    FD_CLR(i, &master); // remove from master set
+				}				
+				
 			}
 			// Chat Message request	
 			else if(((ntohs(*vrs_ty))&0x7F) == 4) {
-				printf("%s: %s \n",usrns[i-sockfd-1],&buf[8]);
+			printf("%s: %s \n",usrns[i-sockfd-1],&buf[8]);
 
                         for(j = 0; j <= sockmax; j++) {
                             	// send to everyone!

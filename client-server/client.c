@@ -178,11 +178,28 @@ int main(int argc, char *argv[])
 	}
 	buf[numbytes] = '\0';
 	struct SBCP *recv_msg=(struct SBCP*) &buf;
-	//FWD msg
+	//FWD message
 	ntohs_struct(recv_msg);
 	if(((recv_msg->vrsn_type)&0x7F) == 3) { 
-		printf("\n%s: %s\n",recv_msg->at[0].payload,recv_msg->at[1].payload);
+		printf("\n%s: %s",recv_msg->at[0].payload,recv_msg->at[1].payload);
 	}
+	// ACK message
+        else if(((recv_msg->vrsn_type)&0x7F) == 7) {
+                printf("\nACK: NUMBER OF ACTIVE CLIENTS: %d \nCLIENTS: %s \n",recv_msg->at[0].payload[0],&recv_msg->at[0].payload[1]);
+        }
+	// NAK message
+	else if(((recv_msg->vrsn_type)&0x7F) == 5) {
+                printf("\nNAK: %s\n",recv_msg->at[0].payload);
+        }
+	// Online message
+	else if(((recv_msg->vrsn_type)&0x7F) == 8) {
+                printf("\n%s is now ONLINE \n",recv_msg->at[0].payload);
+        }
+	// Offline message
+	else if(((recv_msg->vrsn_type)&0x7F) == 6) {
+                printf("\n%s is now OFFLINE \n",recv_msg->at[0].payload);
+        }
+
     }
 
     }
