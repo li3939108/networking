@@ -1,9 +1,10 @@
-// Implement TFTP server
+/*
+** TFTP server implementation 
+*/
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
-#include <string.h>
 #include <errno.h>
 #include <string.h>
 #include <sys/types.h>
@@ -13,68 +14,131 @@
 #include <arpa/inet.h>
 #include <sys/wait.h>
 #include <signal.h>
-#include <stdarg.h>
-#include <assert.h>
-#include <fcntl.h>
-#include "header.h"
-#include "checksum.h"
 
-#define BACKLOG 10 // how many pending connections queue will hold
-#define port 69 // Default port for TFTP
+#define BACKLOG 10     // how many pending connections queue will hold
 
-void sigchld_handler(int s)
+#define RRQ 	0x01
+#define WRQ 	0x02
+#define DATA 	0x03
+#define ACK 	0x04
+#define ERR 	0x05
+
+#define TIMEOUT 2000 /*amount of time to wait for an ACK/Data Packet in 1000microseconds 1000 = 1 second*/
+#define RETRIES 3 /* Number of times to resend a data OR ack packet beforing giving up */
+#define MAXACKFREQ 16 /* Maximum number of packets before ack */
+
+#define MAXDATASIZE 512
+
+//Frame(message) contents of the SBCP protocol
+
+struct Attr{
+uint16_t attrib_type,attrib_len;
+char payload[MAXDATASIZE];
+};
+
+struct SBCP{
+uint16_t vrsn_type, frame_len;
+struct Attr at[MAXATTRIBUTES];
+};
+
+//General htons for struct
+void htons_struct(struct SBCP *m)
 {
-	while(waitpid(-1, NULL, WNOHANG) > 0);
+        int k;
+        m->vrsn_type = htons (m->vrsn_type);
+        for(k=0;k<MAXATTRIBUTES;k++) {
+                m->at[k].attrib_type = htons (m->at[k].attrib_type);
+                m->at[k].attrib_len = htons (m->at[k].attrib_len);
+        }
+        m->frame_len = htons (m->frame_len);
+}
+
+//General ntohs for struct
+void ntohs_struct(struct SBCP *m)
+{
+        int k;
+        m->vrsn_type = ntohs (m->vrsn_type);
+        for(k=0;k<MAXATTRIBUTES;k++) {
+                m->at[k].attrib_type = ntohs (m->at[k].attrib_type);
+                m->at[k].attrib_len = ntohs (m->at[k].attrib_len);
+        }
+        m->frame_len = ntohs (m->frame_len);
+}
+
+
+//Send ACK 
+void send_ack(int i, char *usrns[], int usrns_num) {
+	struct SBCP msg;
+	unsigned char client_count = 0;
+	int k;
+        msg.vrsn_type = (3<<7)|(7);
+        msg.at[0].attrib_type = 4;
+        memset(msg.at[0].payload, '\0', sizeof(msg.at[0].payload));
+        memset(msg.at[0].payload, ' ', 2);
+        for(k=0; k<usrns_num;k++) {
+        	if(usrns[k]!=NULL) {
+                	client_count++;
+                        strcpy(&msg.at[0].payload[strlen(msg.at[0].payload)],usrns[k]);
+                        memset(&msg.at[0].payload[strlen(msg.at[0].payload)], ' ', 2);
+                }
+        }
+        msg.at[0].payload[0] = client_count;
+
+        msg.at[0].attrib_len = strlen(msg.at[0].payload)+4;
+        msg.frame_len = msg.at[0].attrib_len + 4;
+
+        htons_struct(&msg);
+        //Sending ACK
+        if (send(i, (char *)&msg, ntohs(msg.frame_len), 0) == -1){
+	        printf("Error sending\n");
+                perror("send");
+        }
 }
 
 // get sockaddr, IPv4 or IPv6:
 void *get_in_addr(struct sockaddr *sa)
 {
-	if (sa->sa_family == AF_INET) {
-		return &(((struct sockaddr_in*)sa)->sin_addr);
- 	}
-	return &(((struct sockaddr_in6*)sa)->sin6_addr);
+    if (sa->sa_family == AF_INET) {
+        return &(((struct sockaddr_in*)sa)->sin_addr);
+    }
+
+    return &(((struct sockaddr_in6*)sa)->sin6_addr);
 }
 
 int main(int argc, char *argv[])
 {
     int sockfd, sockmax, new_fd;  // listen on sock_fd, new connection on new_fd
     struct addrinfo hints, *servinfo, *p;
-    struct sockaddr_storage their_addr; // connector's address information
-    socklen_t sin_size;
+    struct sockaddr_storage client_addr; // connector's address information
+    socklen_t client_size;
     int yes=1;
     char s[INET6_ADDRSTRLEN];
     int rv,i,j;
     int numbytes;
     char present,buf[MAXDATASIZE];
-
+ 
     //Checking specification of command line options
     if (argc != 3) {
-    	fprintf(stderr,"usage: server server_ip server_port \n");
+        fprintf(stderr,"usage: server server_ip server_port \n");
         exit(1);
     }
-    
+
     memset(&hints, 0, sizeof hints);
     hints.ai_family = AF_UNSPEC;
-    hints.ai_socktype = SOCK_STREAM;
+    hints.ai_socktype = SOCK_DGRAM; //Datagram packet for UDP sender
     hints.ai_flags = AI_PASSIVE; // use my IP
-    
+
     if ((rv = getaddrinfo(argv[1], argv[2], &hints, &servinfo)) != 0) {
         fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(rv));
         return 1;
     }
-    
+
     // loop through all the results and bind to the first we can
     for(p = servinfo; p != NULL; p = p->ai_next) {
-        if ((sockfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1) {
-		perror("server: socket");
-                continue;
-    	}
-
-	if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &yes,
-                sizeof(int)) == -1) {
-            perror("setsockopt");
-            exit(1);
+        if ((sockfd = socket(p->ai_family, p->ai_socktype,
+                p->ai_protocol)) == -1) {
+            perror("server: socket");
+            continue;
         }
 
         if (bind(sockfd, p->ai_addr, p->ai_addrlen) == -1) {
@@ -93,132 +157,174 @@ int main(int argc, char *argv[])
 
     freeaddrinfo(servinfo); // all done with this structure
 
-    if (listen(sockfd, BACKLOG) == -1) {
-	perror("listen");
-        exit(1);
-    }
+    // FD_SET variables for select() 
+    fd_set master,read_fds;
 
-    printf("server: waiting for connections...\n");
+    // clear the master and temp sets
+    FD_ZERO(&master);    
+    FD_ZERO(&read_fds);
 
-    while(1) { // main accept() loop
-	sin_size = sizeof their_addr;
-	new_fd = accept(sockfd, (struct sockaddr *)&their_addr, &sin_size);
-	if (new_fd == -1) {
-		perror("accept");
-		continue;
-	}
+    // add the socket descriptor to the master set
+    FD_SET(sockfd, &master);
+
+    // keep track of the largest socket descriptor to use with select()
+    sockmax = sockfd; // so far, it's this one
+
+    printf("TFTP server started....\n");
+
+    while(1) 
+    {  // main accept() loop
+	read_fds = master;
+	if(select(sockmax+1,&read_fds,NULL,NULL,NULL) == -1) {
+	        printf("Error with select \n");
+        	perror("select");
+	        exit(1);
+    	}
+
+	//Looping through all incoming socket connections 
+	for(i=0; i<=sockmax; i++) {
+		if(FD_ISSET(i, &read_fds)) {
+			if(i == sockfd) {
+				//Accept the new connection
+				client_size = sizeof client_addr;
+				/*clear the buffer */
+				memset (buf, 0, sizeof buf);  
+				recvfrom (sockfd, buf, sizeof buf, MSG_DONTWAIT, (struct sockaddr *) &client_addr, (socklen_t *) & client_size); 
+				new_fd =accept(sockfd, (struct sockaddr *)&their_addr, &sin_size);
+				if(new_fd == -1) {
+					perror("accept");
+					continue;
+				}
+				else {
+					printf("server: Adding to master %d\n",new_fd);
+					FD_SET(new_fd, &master); //Adding to master set
+					if(new_fd > sockmax) {
+						sockmax = new_fd;
+					}
+
+					inet_ntop(their_addr.ss_family, get_in_addr((struct sockaddr *)&their_addr), s, sizeof s);
+					printf("server: got connection from %s\n",s);	
+				}
+           		}
+			
+			else {
+		            	// handle data from a client
+		            	if ((numbytes = recv(i, buf, sizeof buf, 0)) <= 0) {
+		                        // got error or connection closed by client
+		                        printf("server: %s LEFT the chat room \n",usrns[i-sockfd-1]);
+		                	if (numbytes == 0) {
+					        // connection closed
+				        	printf("server: socket %d hung up! Nothing received\n", i);
+		                	} 
+					else {
+						printf("server: some error receiving \n");
+				            	perror("recv");
+		                	}
+					//Sending Offline Message to everyone
+		                        send_to_everyone(i, sockfd, sockmax, 6, master, usrns);
+
+					free(usrns[i-sockfd-1]);
+					usrns[i-sockfd-1]=NULL;
+		                	close(i); // bye!
+		                	FD_CLR(i, &master); // remove from master set
+		            	} 
+				else {
+				        // we got some data from a client
+					buf[numbytes] = '\0';
+					uint16_t *vrs_ty = (uint16_t *)&buf;
+					// JOIN request
+					if(((ntohs(*vrs_ty))&0x7F) == 2)
+					{
+						present=1;
+						char reason[50];
+						//Checking number of clients in room
+						for(j=0 ; j < atoi(argv[3]) ;j++) {
+							if(usrns[j]==NULL){
+								present=0;
+								break;
+							}
+						}
+
+						if(present) {
+					                printf("server: MAX CLIENTS of %d reached. Sorry Try again later!\n",atoi(argv[3]));
+							strcpy(reason,"MAX CLIENTS reached. Sorry Try again later!"); 
+					   	}
+				        	else {
+						        for(j=0 ; j < atoi(argv[3]) ;j++) {
+						                if(usrns[j]!=NULL && strncmp(&buf[8],usrns[j],numbytes-8)==0) {
+						                        printf("server: USERNAME(%s) already present!. Try again\n",usrns[j]);
+									present=1;
+									strcpy(reason,"USERNAME already exists. Try another one!");
+									break;
+								}
+							}
+							// No problems and client can join
+							if(!present) {				
+								usrns[i-sockfd-1]=(char*) malloc(numbytes-8);
+								strncpy(usrns[i-sockfd-1],&buf[8],numbytes-8);
+								printf("server: %s JOINED the chat room\n",usrns[i-sockfd-1]);	
+								//ACK send 
+								send_ack (i, usrns, atoi(argv[3]));	
+								//Sending Online Message to everyone
+								send_to_everyone(i, sockfd, sockmax, 8, master, usrns);
+							}
+						}
+						//NAK send
+						if(present) {
+						    struct SBCP msg;
+				                    msg.vrsn_type = (3<<7)|(5);
+				                    msg.at[0].attrib_type = 1;
+				                    strcpy(msg.at[0].payload,reason); //Reason you it can't join
+				                    msg.at[0].attrib_len = strlen(msg.at[0].payload)+4;
+				                    msg.frame_len = msg.at[0].attrib_len + 4;
+
+						    htons_struct(&msg);
+						    //Sending NAK reason
+				                    if (send(i, (char *)&msg, ntohs(msg.frame_len), 0) == -1){
+						            printf("Error sending\n");
+						            perror("send");
+				                    }
+		   				    close(i); // bye!
+				                    FD_CLR(i, &master); // remove from master set
+						}				
+				
+					}
+					// Chat Message request	
+					else if(((ntohs(*vrs_ty))&0x7F) == 4) {
+						printf("%s: %s \n",usrns[i-sockfd-1],&buf[8]);
+
+						for(j = 0; j <= sockmax; j++) {
+						    	// send to everyone!
+							if (FD_ISSET(j, &master)) {
+								// except the listener and ourselves
+								if ((j > sockfd) && (j != i)) {
+								    struct SBCP msg;
+								    msg.vrsn_type = (3<<7)|(3);
+								    msg.at[0].attrib_type = 2;
+								    strcpy(msg.at[0].payload,usrns[i-sockfd-1]); //username initially to join
+								    msg.at[0].attrib_len = strlen(msg.at[0].payload)+4;
+								    msg.frame_len = msg.at[0].attrib_len + 4;
+
+								    msg.at[1].attrib_type = 4;
+								    strcpy(msg.at[1].payload,&buf[8]);	
+								    msg.at[1].attrib_len = strlen(msg.at[1].payload)+4;
+								    msg.frame_len += msg.at[1].attrib_len ;
+				
+								    htons_struct(&msg);
 	
-	inet_ntop(their_addr.ss_family,
-// get_in_addr((struct sockaddr *)&their_addr),
-// s, sizeof s);
-// printf("server: got connection from %s\n", s);
-// if (!fork()) { // this is the child process
-// close(sockfd); // child doesn't need the listener
-// /* Set Socket to non blocking */
-// //fcntl(new_fd, F_SETFL, O_NONBLOCK);
-// char buf[PACKET_SIZE];
-// char databuf[PAYLOAD_SIZE];
-// int numbytes, ack_bytes;
-// header_t head;
-// packet_t packet;
-// packet_t ackr;
-// //char recved[PACKET_SIZE];
-// int getfilename = 1;
-// char *filename = (char*) "recvfile.txt";
-// FILE * filefd;
-// /* Zero the arrays */
-// bzero(buf, PACKET_SIZE);
-// bzero(databuf, PAYLOAD_SIZE);
-// while(getfilename) {
-// if ((numbytes = recv(new_fd, buf, PACKET_SIZE, 0)) == -1) {
-// perror("recv");
-// exit(1);
-// }	
-// /* We have a packet with filename! */
-// if(numbytes > 0)
-// {
-// read_header(&head, (packet_t *)buf);
-// read_packet((u_char*) databuf, (packet_t *)buf, (u_short) (numbytes - HEADER_SIZE));
-// printf("Packet '%d' received\n", (int)(head.seq));
-// if(add_checksum(numbytes, numbytes%2, (u_short *)buf) == 0) {
-// printf("Checksum OK\n");
-// /* Create ACK to send back with sequence number */
-// fill_header((int)(head.seq), 0, HEADER_SIZE, ACK, &ackr);
-// printf("Filename: '%s' bytes '%d'\n", databuf, numbytes);
-// if((ack_bytes = send(new_fd, &ackr, HEADER_SIZE, 0)) == -1) {
-// perror("send: ack");
-// exit(1);
-// } else {
-// printf("ACK '%d' sent\n", (int)(head.seq));
-// getfilename = 0;
-// }
-// } else {
-// printf("Checksum failed, discarding packet...\n");
-// }
-// }	
-// } /* END first while for filename */
-// //filefd = open(argv[3], O_WRONLY | O_CREAT | O_APPEND);
-// if ( (filefd = fopen(filename, "w")) == NULL)
-// {
-// fprintf(stderr, "Could not open destination file, using stdout.\n");
-// } else {
-// printf("Preparing to start writing file '%s'\n", filename );
-// }
-// int recvFIN = 0;
-// /* re-zero array */
-// bzero(buf, PACKET_SIZE);
-// bzero(databuf, PAYLOAD_SIZE);
-// /* read the file from the socket as long as there is data */
-// do {
-// if ((numbytes = recv(new_fd, buf, PACKET_SIZE, 0)) == -1) {
-// perror("recv");
-// fclose(filefd);
-// close(new_fd);
-// exit(1);
-// }
-// read_header(&head, (packet_t *)buf);
-// if((int)head.flag == ACK)
-// {
-// read_packet((u_char*) databuf, (packet_t *)buf, (u_short) (numbytes - HEADER_SIZE));
-// printf("Packet '%d' received with '%d' bytes with an offset of '%d'\n", (int)(head.seq), numbytes, (int)(head.offset));
-// if(add_checksum(numbytes, numbytes%2, (u_short *)buf) == 0) {
-// printf("Checksum OK\n");
-// /* Create ACK to send back with sequence number */
-// fill_header((int)(head.seq), 0, HEADER_SIZE, ACK, &ackr);
-// if((ack_bytes = send(new_fd, &ackr, HEADER_SIZE, 0)) == -1) {
-// perror("send: ack");
-// exit(1);
-// } else {
-// printf("ACK '%d' sent\n", (int)(head.seq));
-// /* write to file */
-// fwrite(databuf,1 , (int)(head.offset) ,filefd );
-// }
-// } else {
-// printf("Checksum failed, discarding packet...\n");
-// }
-// }	else if ((int)head.flag == FIN) {
-// printf("FIN received...\n");
-// /* Create FIN to send back with sequence number */
-// fill_header((int)(head.seq), 0, HEADER_SIZE, FIN, &ackr);
-// if((ack_bytes = send(new_fd, &ackr, HEADER_SIZE, 0)) == -1) {
-// perror("send: ack");
-// exit(1);
-// } else {
-// printf("FIN '%d' sent\n", (int)(head.seq));
-// recvFIN = 1;
-// }
-// }
-// //else if ((int)head.flag == FIN) {
-// /* re-zero */
-// bzero(buf, PACKET_SIZE);
-// bzero(databuf, PAYLOAD_SIZE);
-// } while (!recvFIN );
-// printf("Done...\n");
-// fclose(filefd);
-// close(new_fd);
-// exit(0);
-// }
-// close(new_fd); // parent doesn't need this
-// }
-// return 0;
-// }
+								    //Sending Chat text and username (FWD)
+								    if (send(j, (char *)&msg, sizeof(msg), 0) == -1){
+									    printf("Error sending\n");
+									    perror("send");
+							    	    }
+				    				}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+    }	
+    return 0;
+}
