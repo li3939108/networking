@@ -17,6 +17,8 @@
 
 #define BACKLOG 10     // how many pending connections queue will hold
 
+// Defining TFTP frame Opcodes
+
 #define RRQ 	0x01
 #define WRQ 	0x02
 #define DATA 	0x03
@@ -29,71 +31,274 @@
 
 #define MAXDATASIZE 512
 
-//Frame(message) contents of the SBCP protocol
+// Function prototypes 
+void tftp_sendfile (char *, struct sockaddr_in, char *, int) {
 
-struct Attr{
-uint16_t attrib_type,attrib_len;
-char payload[MAXDATASIZE];
-};
-
-struct SBCP{
-uint16_t vrsn_type, frame_len;
-struct Attr at[MAXATTRIBUTES];
-};
-
-//General htons for struct
-void htons_struct(struct SBCP *m)
+void
+tsend (char *pFilename, struct sockaddr_in client, char *pMode, int tid)
 {
-        int k;
-        m->vrsn_type = htons (m->vrsn_type);
-        for(k=0;k<MAXATTRIBUTES;k++) {
-                m->at[k].attrib_type = htons (m->at[k].attrib_type);
-                m->at[k].attrib_len = htons (m->at[k].attrib_len);
+  int sock, len, client_len, opcode, ssize = 0, n, i, j, bcount = 0;
+  unsigned short int count = 0, rcount = 0, acked = 0;
+  unsigned char filebuf[MAXDATASIZE + 1];
+  unsigned char packetbuf[MAXACKFREQ][MAXDATASIZE + 12],
+    recvbuf[MAXDATASIZE + 12];
+  char filename[128], mode[12], fullpath[196], *bufindex;
+  struct sockaddr_in ack;
+
+  FILE *fp;                     /* pointer to the file we will be sending */
+
+  strcpy (filename, pFilename); //copy the pointer to the filename into a real array
+  strcpy (mode, pMode);         //same as above
+
+  if (debug)
+    printf ("branched to file send function\n");
+
+
+  if ((sock = socket (PF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0)   //startup a socket
+    {
+      printf ("Server reconnect for sending did not work correctly\n");
+      return;
+    }
+  if (!strncasecmp (mode, "octet", 5) && !strncasecmp (mode, "netascii", 8))    /* these two are the only modes we accept */
+    {
+      if (!strncasecmp (mode, "mail", 4))
+        len = sprintf ((char *) packetbuf[0],
+                       "%c%c%c%cThis tftp server will not operate as a mail relay%c",
+                       0x00, 0x05, 0x00, 0x04, 0x00);
+      else
+        len = sprintf ((char *) packetbuf[0],
+                       "%c%c%c%cUnrecognized mode (%s)%c",
+                       0x00, 0x05, 0x00, 0x04, mode, 0x00);
+      if (sendto (sock, packetbuf[0], len, 0, (struct sockaddr *) &client, sizeof (client)) != len)     /* send the data packet */
+        {
+          printf
+            ("Mismatch in number of sent bytes while trying to send mode error packet\n");
         }
-        m->frame_len = htons (m->frame_len);
-}
-
-//General ntohs for struct
-void ntohs_struct(struct SBCP *m)
-{
-        int k;
-        m->vrsn_type = ntohs (m->vrsn_type);
-        for(k=0;k<MAXATTRIBUTES;k++) {
-                m->at[k].attrib_type = ntohs (m->at[k].attrib_type);
-                m->at[k].attrib_len = ntohs (m->at[k].attrib_len);
+      return;
+    }
+  if (strchr (filename, 0x5C) || strchr (filename, 0x2F))       //look for illegal characters in the filename string these are \ and /
+    {
+      if (debug)
+      printf ("Server requested bad file: forbidden name\n");
+      len =
+        sprintf ((char *) packetbuf[0],
+                 "%c%c%c%cIllegal filename.(%s) You may not attempt to descend or ascend directories.%c",
+                 0x00, 0x05, 0x00, 0x00, filename, 0x00);
+      if (sendto (sock, packetbuf[0], len, 0, (struct sockaddr *) &client, sizeof (client)) != len)     /* send the data packet */
+        {
+          printf
+            ("Mismatch in number of sent bytes while trying to send error packet\n");
         }
-        m->frame_len = ntohs (m->frame_len);
-}
+      return;
+
+    }
+  strcpy (fullpath, path);
+  strncat (fullpath, filename, sizeof (fullpath) - 1);  //build the full file path by appending filename to path
+  fp = fopen (fullpath, "r");
+  if (fp == NULL)
+    {                           //if the pointer is null then the file can't be opened - Bad perms OR no such file
+      if (debug)
+        printf ("Server requested bad file: file not found (%s)\n", fullpath);
+      len =
+        sprintf ((char *) packetbuf[0], "%c%c%c%cFile not found (%s)%c", 0x00,
+                 0x05, 0x00, 0x01, fullpath, 0x00);
+      if (sendto (sock, packetbuf[0], len, 0, (struct sockaddr *) &client, sizeof (client)) != len)     /* send the data packet */
+        {
+          printf
+            ("Mismatch in number of sent bytes while trying to send error packet\n");
+        }
+      return;
+    }
+  else
+    {
+      if (debug)
+        printf ("Sending file... (source: %s)\n", fullpath);
+
+    }
+  memset (filebuf, 0, sizeof (filebuf));
+  while (1)                     /* our break statement will escape us when we are done */
+    {
+      acked = 0;
+      ssize = fread (filebuf, 1, datasize, fp);
+ count++;                  /* count number of datasize byte portions we read from the file */
+      if (count == 1)           /* we always look for an ack on the FIRST packet */
+        bcount = 0;
+      else if (count == 2)      /* The second packet will always start our counter at zreo. This special case needs to exist to avoid a DBZ when count = 2 - 2 = 0 */
+        bcount = 0;
+      else
+        bcount = (count - 2) % ackfreq;
+
+      sprintf ((char *) packetbuf[bcount], "%c%c%c%c", 0x00, 0x03, 0x00, 0x00); /* build data packet but write out the count as zero */
+      memcpy ((char *) packetbuf[bcount] + 4, filebuf, ssize);
+      len = 4 + ssize;
+      packetbuf[bcount][2] = (count & 0xFF00) >> 8;     //fill in the count (top number first)
+      packetbuf[bcount][3] = (count & 0x00FF);  //fill in the lower part of the count
+      if (debug)
+        printf ("Sending packet # %04d (length: %d file chunk: %d)\n",
+                count, len, ssize);
+
+      if (sendto (sock, packetbuf[bcount], len, 0, (struct sockaddr *) &client, sizeof (client)) != len)        /* send the data packet */
+        {
+          if (debug)
+            printf ("Mismatch in number of sent bytes\n");
+          return;
+        }
 
 
-//Send ACK 
-void send_ack(int i, char *usrns[], int usrns_num) {
-	struct SBCP msg;
-	unsigned char client_count = 0;
-	int k;
-        msg.vrsn_type = (3<<7)|(7);
-        msg.at[0].attrib_type = 4;
-        memset(msg.at[0].payload, '\0', sizeof(msg.at[0].payload));
-        memset(msg.at[0].payload, ' ', 2);
-        for(k=0; k<usrns_num;k++) {
-        	if(usrns[k]!=NULL) {
-                	client_count++;
-                        strcpy(&msg.at[0].payload[strlen(msg.at[0].payload)],usrns[k]);
-                        memset(&msg.at[0].payload[strlen(msg.at[0].payload)], ' ', 2);
+      if ((count - 1) == 0 || ((count - 1) % ackfreq) == 0
+          || ssize != datasize)
+        {
+/* The following 'for' loop is used to recieve/timeout ACKs */
+          for (j = 0; j < RETRIES; j++)
+            {
+              client_len = sizeof (ack);
+              errno = EAGAIN;
+              n = -1;
+              for (i = 0; errno == EAGAIN && i <= TIMEOUT && n < 0; i++)
+                {
+                  n =
+                    recvfrom (sock, recvbuf, sizeof (recvbuf), MSG_DONTWAIT,
+                              (struct sockaddr *) &ack,
+                              (socklen_t *) & client_len);
+
+                  usleep (1000);
                 }
-        }
-        msg.at[0].payload[0] = client_count;
+              if (n < 0 && errno != EAGAIN)
+                {
 
-        msg.at[0].attrib_len = strlen(msg.at[0].payload)+4;
-        msg.frame_len = msg.at[0].attrib_len + 4;
+                {
+                  if (debug)
+                    printf
+                      ("The server could not receive from the client (errno: %d n: %d)\n",
+                       errno, n);
+                  //resend packet
+                }
+              else if (n < 0 && errno == EAGAIN)
+                {
+                  if (debug)
+                    printf ("Timeout waiting for ack (errno: %d n: %d)\n",
+                            errno, n);
+                  //resend packet
 
-        htons_struct(&msg);
-        //Sending ACK
-        if (send(i, (char *)&msg, ntohs(msg.frame_len), 0) == -1){
-	        printf("Error sending\n");
-                perror("send");
+                }
+              else
+                {
+
+                  if (client.sin_addr.s_addr != ack.sin_addr.s_addr)    /* checks to ensure send to ip is same from ACK IP */
+                    {
+                      if (debug)
+                        printf
+                          ("Error recieving ACK (ACK from invalid address)\n");
+                      j--;      /* in this case someone else connected to our port. Ignore this fact and retry getting the ack */
+                      continue;
+                    }
+                  if (tid != ntohs (client.sin_port))   /* checks to ensure get from the correct TID */
+                    {
+                      if (debug)
+                        printf
+                          ("Error recieving file (data from invalid tid)\n");
+                      len =
+                        sprintf ((char *) recvbuf,
+                                 "%c%c%c%cBad/Unknown TID%c", 0x00, 0x05,
+                                 0x00, 0x05, 0x00);
+                      if (sendto (sock, recvbuf, len, 0, (struct sockaddr *) &client, sizeof (client)) != len)  /* send the data packet */
+                        {
+                          printf
+                            ("Mismatch in number of sent bytes while trying to send mode error packet\n");
+                        }
+                      j--;
+
+                      continue; /* we aren't going to let another connection spoil our first connection */
+                    }
+
+/* this formatting code is just like the code in the main function */
+                  bufindex = (char *) recvbuf;  //start our pointer going
+                  if (bufindex++[0] != 0x00)
+                    printf ("bad first nullbyte!\n");
+                  opcode = *bufindex++;
+
+                  rcount = *bufindex++ << 8;
+                  rcount &= 0xff00;
+                  rcount += (*bufindex++ & 0x00ff);
+                  if (opcode != 4 || rcount != count)   /* ack packet should have code 4 (ack) and should be acking the packet we just sent */
+                    {
+                      if (debug)
+                        printf
+                          ("Remote host failed to ACK proper data packet # %d (got OP: %d Block: %d)\n",
+                           count, opcode, rcount);
+/* sending error message */
+                      if (opcode > 5)
+                        {
+                          len = sprintf ((char *) recvbuf,
+                                         "%c%c%c%cIllegal operation%c",
+                                         0x00, 0x05, 0x00, 0x04, 0x00);
+                          if (sendto (sock, recvbuf, len, 0, (struct sockaddr *) &client, sizeof (client)) != len)      /* send the data packet */
+                            {
+                              printf
+                                ("Mismatch in number of sent bytes while trying to send mode error packet\n");
+                            }
+                        }
+                      /* from here we will loop back and resend */
+                    }
+                  else
+                    {
+                      if (debug)
+                        printf ("Remote host successfully ACK'd (#%d)\n",
+                                rcount);
+                      break;
+                    }
+                }
+              for (i = 0; i <= bcount; i++)
+                {
+                  if (sendto (sock, packetbuf[i], len, 0, (struct sockaddr *) &client, sizeof (client)) != len) /* resend the data packet */
+                    {
+                      if (debug)
+                        printf ("Mismatch in number of sent bytes\n");
+                      return;
+                    }
+                  if (debug)
+                    printf ("Ack(s) lost. Resending: %d\n",
+                            count - bcount + i);
+                }
+              if (debug)
+                printf ("Ack(s) lost. Resending complete.\n");
+
+            }
+/* The ack sending 'for' loop ends here */
+
         }
+      else if (debug)
+        {
+          printf ("Not attempting to recieve ack. Not required. count: %d\n",
+                  count);
+          n = recvfrom (sock, recvbuf, sizeof (recvbuf), MSG_DONTWAIT, (struct sockaddr *) &ack, (socklen_t *) & client_len);   /* just do a quick check incase the remote host is trying with ackfreq = 1 */
+
+        }
+
+      if (j == RETRIES)
+        {
+          if (debug)
+            printf ("Ack Timeout. Aborting transfer\n");
+          fclose (fp);
+
+          return;
+        }
+      if (ssize != datasize)
+        break;
+
+      memset (filebuf, 0, sizeof (filebuf));    /* fill the filebuf with zeros so that when the fread fills it, it is a null terminated string */
+    }
+
+  fclose (fp);
+  if (debug)
+    printf ("File sent successfully\n");
+
+  return;
 }
+
+
+
+//void tftp_getfile (char *, struct sockaddr_in, char *, int);
 
 // get sockaddr, IPv4 or IPv6:
 void *get_in_addr(struct sockaddr *sa)
@@ -109,13 +314,13 @@ int main(int argc, char *argv[])
 {
     int sockfd, sockmax, new_fd;  // listen on sock_fd, new connection on new_fd
     struct addrinfo hints, *servinfo, *p;
-    struct sockaddr_storage client_addr; // connector's address information
+    struct sockaddr_in client_addr; // connector's address information
     socklen_t client_size;
     int yes=1;
     char s[INET6_ADDRSTRLEN];
-    int rv,i,j;
-    int numbytes;
-    char present,buf[MAXDATASIZE];
+    int rv,i,j,tid;
+    int numbytes,opcode;
+    char *index,buf[MAXDATASIZE],mode[12],filename[256];
  
     //Checking specification of command line options
     if (argc != 3) {
@@ -182,44 +387,91 @@ int main(int argc, char *argv[])
     	}
 
 	//Looping through all incoming socket connections 
-	for(i=0; i<=sockmax; i++) {
-		if(FD_ISSET(i, &read_fds)) {
-			if(i == sockfd) {
-				//Accept the new connection
-				client_size = sizeof client_addr;
-				/*clear the buffer */
-				memset (buf, 0, sizeof buf);  
-				recvfrom (sockfd, buf, sizeof buf, MSG_DONTWAIT, (struct sockaddr *) &client_addr, (socklen_t *) & client_size); 
-				new_fd =accept(sockfd, (struct sockaddr *)&their_addr, &sin_size);
-				if(new_fd == -1) {
-					perror("accept");
-					continue;
-				}
-				else {
-					printf("server: Adding to master %d\n",new_fd);
-					FD_SET(new_fd, &master); //Adding to master set
-					if(new_fd > sockmax) {
-						sockmax = new_fd;
-					}
-
-					inet_ntop(their_addr.ss_family, get_in_addr((struct sockaddr *)&their_addr), s, sizeof s);
-					printf("server: got connection from %s\n",s);	
-				}
-           		}
-			
+	//for(i=0; i<=sockmax; i++) {
+	i=sockfd;
+	if(FD_ISSET(i, &read_fds)) {
+		if(i == sockfd) {
+			//Accept the new connection
+			client_size = sizeof client_addr;
+			/*clear the buffer */
+			memset (buf, 0, sizeof buf); 
+			 
+			if((numbytes = recvfrom (sockfd, buf, sizeof buf, MSG_DONTWAIT, (struct sockaddr *) &client_addr, (socklen_t *) & client_size)) < 0)
+			{
+				perror("Server could not receive from client");
+				continue;
+			}
 			else {
-		            	// handle data from a client
-		            	if ((numbytes = recv(i, buf, sizeof buf, 0)) <= 0) {
-		                        // got error or connection closed by client
-		                        printf("server: %s LEFT the chat room \n",usrns[i-sockfd-1]);
-		                	if (numbytes == 0) {
-					        // connection closed
-				        	printf("server: socket %d hung up! Nothing received\n", i);
-		                	} 
-					else {
-						printf("server: some error receiving \n");
-				            	perror("recv");
-		                	}
+				//printf("server: Adding to master %d\n",new_fd);
+				//FD_SET(new_fd, &master); //Adding to master set
+				//if(new_fd > sockmax) {
+				//	sockmax = new_fd;
+				//}
+				printf("server: got connection from %s , port: %d \n",inet_ntoa (client_addr.sin_addr), ntohs (client_addr.sin_port));	
+
+				index = buf;          
+				if (index++[0] != 0x00)
+			        {       //first TFTP packet byte needs to be null. Once the value is taken increment it.
+				        printf ("Malformed tftp packet.\n");
+				        return 0;
+			        }
+			        tid = ntohs (client_addr.sin_port);    
+				opcode = *index++;   
+
+				if (opcode == RRQ || opcode == WRQ)   // RRQ/WRQ requests
+			        {
+					// obtaining filename from the TFTP frame
+					strncpy (filename, index, sizeof (filename) - 1);  
+					// Moving the index further and parsing 1 null byte after filename
+				        index += strlen (filename) + 1;    
+					// obtaining mode of TFTP file transfer (Octet/Netascii)
+				        strncpy (mode, index, sizeof (mode) - 1);  
+					// Moving the index further 
+				        index += strlen (mode) + 1; 
+					// Print decoded values from the TFTP frame       					
+					printf ("opcode: %x filename: %s packet size: %d mode: %s\n", opcode, filename, numbytes, mode);   
+			        }			
+				else
+			        {
+					// not read/write request
+				        printf ("opcode: %x size: %d \n", opcode, numbytes);      
+        			}
+			  
+				switch (opcode)           
+			        {
+				        case 1:
+            					printf ("READ REQUEST\n");
+				        //        tftp_sendfile (filename, client_addr, mode, tid);
+				        
+          				break;
+				        case 2:
+						printf ("WRITE REQUEST\n");
+				         //       tftp_getfile (filename, client_addr, mode, tid);
+					break;
+					default:
+						printf ("Invalid opcode detected !\n");
+					break;
+				}				
+			}
+       		}
+	}
+   }
+   return 0;
+}
+			
+/*		else {
+		       	// handle data from a client
+		       	if ((numbytes = recv(i, buf, sizeof buf, 0)) <= 0) {
+		        // got error or connection closed by client
+		        	printf("server: %s LEFT the chat room \n",usrns[i-sockfd-1]);
+		                if (numbytes == 0) {
+				        // connection closed
+				       	printf("server: socket %d hung up! Nothing received\n", i);
+		                } 
+				else {
+					printf("server: some error receiving \n");
+			        	perror("recv");
+		                }
 					//Sending Offline Message to everyone
 		                        send_to_everyone(i, sockfd, sockmax, 6, master, usrns);
 
@@ -327,4 +579,4 @@ int main(int argc, char *argv[])
 	}
     }	
     return 0;
-}
+}*/
