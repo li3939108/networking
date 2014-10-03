@@ -47,11 +47,11 @@ char cwd[100];
 // Function prototypes 
 void tftp_sendfile (char *file_name, struct sockaddr_in client, char *transfer_mode, int tid)
 {
-	int sock, len, client_len, opcode, ssize = 0, n, i, j, bcount = 0;
-	unsigned short int count = 0, rcount = 0, acked = 0;
+	int sock, len, client_len, opcode, ssize = 0, n, i, j;
+	unsigned short int count = 0, rcount = 0, bcount =0;
 	char filebuf[MAXDATASIZE + 1];
 	char sendbuf[MAXDATASIZE + 12],recvbuf[MAXDATASIZE + 12];
-	char filename[128], mode[12], file_path[196], *index;
+	char filename[128], mode[12], file_path[196], *index, *ptr;
 	struct sockaddr_in ack;
 
 	// Obtaining Current directory
@@ -73,16 +73,14 @@ void tftp_sendfile (char *file_name, struct sockaddr_in client, char *transfer_m
 	}
 	
 	// Error handling for mode
-	if (!strncasecmp (mode, "octet", 5))    
+	if (strncasecmp (mode, "octet", 5))    
 	{
-		if (!strncasecmp (mode, "mail", 4) || !strncasecmp (mode, "netascii", 8)) {
+		if (strncasecmp (mode, "mail", 4) || strncasecmp (mode, "netascii", 8)) {
 	  		printf ("server: %s mode not supported \n ",mode);
-			len = sprintf ((char *) sendbuf, "%c%c%c%c(%s) mode not supported.%c", 0x00, ERR, 0x00, error_code[0], mode, 0x00);				
-		}
+			len = sprintf ((char *) sendbuf, "%c%c%c%c(%s) mode not supported.%c", 0x00, ERR, 0x00, error_code[0], mode, 0x00);		     }
 	        else {
                         printf ("server: %s mode unrecognized \n ",mode);
-                        len = sprintf ((char *) sendbuf, "%c%c%c%c(%s) mode unrecognized.%c", 0x00, ERR, 0x00, error_code[0], mode, 0x00);    
-                }
+                        len = sprintf ((char *) sendbuf, "%c%c%c%c(%s) mode unrecognized.%c", 0x00, ERR, 0x00, error_code[0], mode, 0x00);                    }
 		
 		//Sending Error PCKT to client
 		if (sendto (sock, sendbuf, len, 0, (struct sockaddr *) &client, sizeof (client)) != len)     
@@ -92,7 +90,7 @@ void tftp_sendfile (char *file_name, struct sockaddr_in client, char *transfer_m
     	}
 
 	//Appending the filename to the path
-  	strcpy (file_path, cwd);
+	sprintf(file_path,"%s/",cwd);
 	strncat (file_path, filename, sizeof (file_path) - 1);  
 	fp = fopen (file_path, "r");
 	if (fp == NULL) {              
@@ -112,19 +110,15 @@ void tftp_sendfile (char *file_name, struct sockaddr_in client, char *transfer_m
 	memset (filebuf, 0, sizeof (filebuf));
 	while (1)   
     	{
-		acked = 0;
 	        ssize = fread (filebuf, 1, MAXDATASIZE, fp);
-		count++;  
-		if (count == 1)
-		        bcount = 0;
-	        else if (count == 2)      
-			bcount = 0;
-	        else
-		        bcount = (count - 2);
-
-		sprintf ((char *) sendbuf, "%c%c%c%c", 0x00, DATA, 0x00, 0x00);  
-	        memcpy ((char *) sendbuf + 4, filebuf, ssize);
+		count++; 
+		count = htons(count); 
+		ptr = &count;
+		sprintf ((char *) sendbuf, "%c%c", 0x00, DATA);  
+	        memcpy ((char *) sendbuf + 2, ptr, 2); 
+		memcpy ((char *) sendbuf + 4, filebuf, ssize);
 	        len = 4 + ssize;
+		count = ntohs(count);
         	printf ("server: Sending packet # %04d (length: %d file chunk: %d)\n", count, len, ssize);
 
 		// Sending the data packet
@@ -133,23 +127,18 @@ void tftp_sendfile (char *file_name, struct sockaddr_in client, char *transfer_m
 		        return;
 	        }
 
-		if ((count - 1) == 0 || ssize != MAXDATASIZE) {
+		if ((count - 1) >= 0 || ssize != MAXDATASIZE) {
         		// Loop to recieve/timeout ACKs
 			for (j = 0; j < RETRIES; j++) {
 				client_len = sizeof (ack);
               			n = -1;
               			for (i = 0; i <= TIMEOUT && n < 0; i++) {
 			                n = recvfrom (sock, recvbuf, sizeof (recvbuf), MSG_DONTWAIT, (struct sockaddr *) &ack, (socklen_t *) & client_len);
-			        	usleep (1000);
                 		}
-			        if (n < 0 && errno != EAGAIN) {
-                			printf ("The server could not receive from the client (errno: %d n: %d)\n", errno, n);
+			        if (n < 0 ) {
+                			printf ("server: The server could not receive from the client (n: %d)\n", n);
 			                //resend packet
                 		}	
-		                else if (n < 0 && errno == EAGAIN) {
-                                        printf ("Timeout waiting for ack (errno: %d n: %d)\n", errno, n);
-			                //resend packet
-		                }
                			else {
 					// Maybe someone connected to us
 	          			if (client.sin_addr.s_addr != ack.sin_addr.s_addr) {
@@ -176,7 +165,7 @@ void tftp_sendfile (char *file_name, struct sockaddr_in client, char *transfer_m
 			                opcode = *index++;
 			                rcount = *index++ << 8;
  		                        rcount &= 0xff00;
-			                rcount += (*index++ & 0x00ff);
+			                rcount |= (*index++ & 0x00ff);
 					// Checking the opcode and the block number of the ACK for the sent packet
 		                        if (opcode != ACK || rcount != count) {
                         			printf ("server: Remote host failed to ACK proper data packet # %d (got OP: %d Block: %d)\n", count, opcode, rcount);
@@ -193,7 +182,7 @@ void tftp_sendfile (char *file_name, struct sockaddr_in client, char *transfer_m
                     			}
                 		}
 				
-				for (i = 0; i <= bcount; i++) {
+				for (i = 0; i < bcount; i++) {
 					// resending data packet
 					if (sendto (sock, sendbuf, len, 0, (struct sockaddr *) &client, sizeof (client)) != len) {
 						printf ("server: Error resending data packet\n");
@@ -201,13 +190,12 @@ void tftp_sendfile (char *file_name, struct sockaddr_in client, char *transfer_m
                     			}
                     			printf ("server: Ack(s) lost. Resending: %d\n", count - bcount + i);
                 		}
-              	                printf ("server: Ack(s) lost. Resending complete.\n");
+              	                //printf ("server: Ack(s) lost. Resending complete.\n");
 
             		}
         	}
 		
-		printf ("server: Not attempting to recieve ack. Not required. count: %d\n", count);
-		n = recvfrom (sock, recvbuf, sizeof (recvbuf), MSG_DONTWAIT, (struct sockaddr *) &ack, (socklen_t *) & client_len);   
+		//n = recvfrom (sock, recvbuf, sizeof (recvbuf), MSG_DONTWAIT, (struct sockaddr *) &ack, (socklen_t *) & client_len);   
         
 		if (j == RETRIES) {
         		printf ("server: Ack Timeout. Aborting transfer\n");
@@ -369,12 +357,12 @@ int main(int argc, char *argv[])
 				switch (opcode)           
 			        {
 				        case 1:
-            					printf ("READ REQUEST\n");
+            					printf ("server: READ REQUEST\n");
 				        	tftp_sendfile (filename, client_addr, mode, tid);
 				        
           				break;
 				        case 2:
-						printf ("WRITE REQUEST\n");
+						printf ("server: WRITE REQUEST\n");
 				         //       tftp_getfile (filename, client_addr, mode, tid);
 					break;
 					default:
