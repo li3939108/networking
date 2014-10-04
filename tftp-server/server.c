@@ -48,7 +48,7 @@ char cwd[100];
 void tftp_sendfile (char *file_name, struct sockaddr_in client, char *transfer_mode, int tid)
 {
 	int sock, len, client_len, opcode, ssize = 0, n, i, j;
-	unsigned short int count = 0, rcount = 0, bcount =0;
+	unsigned short int count = 0, rcount = 0, resend =0;
 	char filebuf[MAXDATASIZE + 1];
 	char sendbuf[MAXDATASIZE + 12],recvbuf[MAXDATASIZE + 12];
 	char filename[128], mode[12], file_path[196], *index, *ptr;
@@ -113,7 +113,7 @@ void tftp_sendfile (char *file_name, struct sockaddr_in client, char *transfer_m
 	        ssize = fread (filebuf, 1, MAXDATASIZE, fp);
 		count++; 
 		count = htons(count); 
-		ptr = &count;
+		ptr = (char *) &count;
 		sprintf ((char *) sendbuf, "%c%c", 0x00, DATA);  
 	        memcpy ((char *) sendbuf + 2, ptr, 2); 
 		memcpy ((char *) sendbuf + 4, filebuf, ssize);
@@ -127,17 +127,20 @@ void tftp_sendfile (char *file_name, struct sockaddr_in client, char *transfer_m
 		        return;
 	        }
 
-		if ((count - 1) >= 0 || ssize != MAXDATASIZE) {
+		if ((count >= 1) || ssize != MAXDATASIZE) {
         		// Loop to recieve/timeout ACKs
 			for (j = 0; j < RETRIES; j++) {
 				client_len = sizeof (ack);
               			n = -1;
+				resend = 0;
               			for (i = 0; i <= TIMEOUT && n < 0; i++) {
 			                n = recvfrom (sock, recvbuf, sizeof (recvbuf), MSG_DONTWAIT, (struct sockaddr *) &ack, (socklen_t *) & client_len);
+					// Sleep so that there is some delay between the next request to handle errors
+					usleep(10);
                 		}
 			        if (n < 0 ) {
                 			printf ("server: The server could not receive from the client (n: %d)\n", n);
-			                //resend packet
+			                resend = 1;
                 		}	
                			else {
 					// Maybe someone connected to us
@@ -150,7 +153,7 @@ void tftp_sendfile (char *file_name, struct sockaddr_in client, char *transfer_m
 		                        if (tid != ntohs (client.sin_port)) {
                         			printf ("Error recieving file (data from invalid tid)\n");
 			                        len = sprintf ((char *) recvbuf, "%c%c%c%cBad/Unknown TID%c", 0x00, ERR, 0x00, error_code[5], 0x00);
-						// Send erro packet
+						// Send error packet
 			                        if (sendto (sock, recvbuf, len, 0, (struct sockaddr *) &client, sizeof (client)) != len) 
 							printf ("server: Port error packet not sent correctly\n");
                         		
@@ -182,20 +185,19 @@ void tftp_sendfile (char *file_name, struct sockaddr_in client, char *transfer_m
                     			}
                 		}
 				
-				for (i = 0; i < bcount; i++) {
+				if(resend == 1) {
 					// resending data packet
 					if (sendto (sock, sendbuf, len, 0, (struct sockaddr *) &client, sizeof (client)) != len) {
 						printf ("server: Error resending data packet\n");
 			                        return;
                     			}
-                    			printf ("server: Ack(s) lost. Resending: %d\n", count - bcount + i);
+                    			printf ("server: Ack(s) lost. Resending: %d\n", count);
+					continue;					
                 		}
-              	                //printf ("server: Ack(s) lost. Resending complete.\n");
 
             		}
         	}
 		
-		//n = recvfrom (sock, recvbuf, sizeof (recvbuf), MSG_DONTWAIT, (struct sockaddr *) &ack, (socklen_t *) & client_len);   
         
 		if (j == RETRIES) {
         		printf ("server: Ack Timeout. Aborting transfer\n");
@@ -233,7 +235,6 @@ int main(int argc, char *argv[])
     struct addrinfo hints, *servinfo, *p;
     struct sockaddr_in client_addr; // connector's address information
     socklen_t client_size;
-    int yes=1;
     char s[INET6_ADDRSTRLEN];
     int rv,i,j,tid;
     int numbytes,opcode;
@@ -375,125 +376,3 @@ int main(int argc, char *argv[])
    }
    return 0;
 }
-			
-/*		else {
-		       	// handle data from a client
-		       	if ((numbytes = recv(i, buf, sizeof buf, 0)) <= 0) {
-		        // got error or connection closed by client
-		        	printf("server: %s LEFT the chat room \n",usrns[i-sockfd-1]);
-		                if (numbytes == 0) {
-				        // connection closed
-				       	printf("server: socket %d hung up! Nothing received\n", i);
-		                } 
-				else {
-					printf("server: some error receiving \n");
-			        	perror("recv");
-		                }
-					//Sending Offline Message to everyone
-		                        send_to_everyone(i, sockfd, sockmax, 6, master, usrns);
-
-					free(usrns[i-sockfd-1]);
-					usrns[i-sockfd-1]=NULL;
-		                	close(i); // bye!
-		                	FD_CLR(i, &master); // remove from master set
-		            	} 
-				else {
-				        // we got some data from a client
-					buf[numbytes] = '\0';
-					uint16_t *vrs_ty = (uint16_t *)&buf;
-					// JOIN request
-					if(((ntohs(*vrs_ty))&0x7F) == 2)
-					{
-						present=1;
-						char reason[50];
-						//Checking number of clients in room
-						for(j=0 ; j < atoi(argv[3]) ;j++) {
-							if(usrns[j]==NULL){
-								present=0;
-								break;
-							}
-						}
-
-						if(present) {
-					                printf("server: MAX CLIENTS of %d reached. Sorry Try again later!\n",atoi(argv[3]));
-							strcpy(reason,"MAX CLIENTS reached. Sorry Try again later!"); 
-					   	}
-				        	else {
-						        for(j=0 ; j < atoi(argv[3]) ;j++) {
-						                if(usrns[j]!=NULL && strncmp(&buf[8],usrns[j],numbytes-8)==0) {
-						                        printf("server: USERNAME(%s) already present!. Try again\n",usrns[j]);
-									present=1;
-									strcpy(reason,"USERNAME already exists. Try another one!");
-									break;
-								}
-							}
-							// No problems and client can join
-							if(!present) {				
-								usrns[i-sockfd-1]=(char*) malloc(numbytes-8);
-								strncpy(usrns[i-sockfd-1],&buf[8],numbytes-8);
-								printf("server: %s JOINED the chat room\n",usrns[i-sockfd-1]);	
-								//ACK send 
-								send_ack (i, usrns, atoi(argv[3]));	
-								//Sending Online Message to everyone
-								send_to_everyone(i, sockfd, sockmax, 8, master, usrns);
-							}
-						}
-						//NAK send
-						if(present) {
-						    struct SBCP msg;
-				                    msg.vrsn_type = (3<<7)|(5);
-				                    msg.at[0].attrib_type = 1;
-				                    strcpy(msg.at[0].payload,reason); //Reason you it can't join
-				                    msg.at[0].attrib_len = strlen(msg.at[0].payload)+4;
-				                    msg.frame_len = msg.at[0].attrib_len + 4;
-
-						    htons_struct(&msg);
-						    //Sending NAK reason
-				                    if (send(i, (char *)&msg, ntohs(msg.frame_len), 0) == -1){
-						            printf("Error sending\n");
-						            perror("send");
-				                    }
-		   				    close(i); // bye!
-				                    FD_CLR(i, &master); // remove from master set
-						}				
-				
-					}
-					// Chat Message request	
-					else if(((ntohs(*vrs_ty))&0x7F) == 4) {
-						printf("%s: %s \n",usrns[i-sockfd-1],&buf[8]);
-
-						for(j = 0; j <= sockmax; j++) {
-						    	// send to everyone!
-							if (FD_ISSET(j, &master)) {
-								// except the listener and ourselves
-								if ((j > sockfd) && (j != i)) {
-								    struct SBCP msg;
-								    msg.vrsn_type = (3<<7)|(3);
-								    msg.at[0].attrib_type = 2;
-								    strcpy(msg.at[0].payload,usrns[i-sockfd-1]); //username initially to join
-								    msg.at[0].attrib_len = strlen(msg.at[0].payload)+4;
-								    msg.frame_len = msg.at[0].attrib_len + 4;
-
-								    msg.at[1].attrib_type = 4;
-								    strcpy(msg.at[1].payload,&buf[8]);	
-								    msg.at[1].attrib_len = strlen(msg.at[1].payload)+4;
-								    msg.frame_len += msg.at[1].attrib_len ;
-				
-								    htons_struct(&msg);
-	
-								    //Sending Chat text and username (FWD)
-								    if (send(j, (char *)&msg, sizeof(msg), 0) == -1){
-									    printf("Error sending\n");
-									    perror("send");
-							    	    }
-				    				}
-							}
-						}
-					}
-				}
-			}
-		}
-	}
-    }	
-    return 0;
-}*/
