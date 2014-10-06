@@ -221,7 +221,7 @@ void *get_in_addr(struct sockaddr *sa)
 
 int main(int argc, char *argv[])
 {
-    int sockfd, new_fd, sockmax, i, rv;  
+    int sockfd, new_fd, rv;  
     struct addrinfo hints, *servinfo, *p;
     struct sockaddr_in client_addr; // connector's address information
     socklen_t client_size;
@@ -288,7 +288,7 @@ int main(int argc, char *argv[])
     while(1) 
     {  // main accept() loop
 	read_fds = master;
-	if(select(sockmax+1,&read_fds,NULL,NULL,NULL) == -1) {
+	if(select(sockmax+1,&read_fds,NULL,NULL,&tv) == -1) {
 	        printf("Error with select \n");
         	perror("select");
 	        exit(1);
@@ -331,7 +331,7 @@ int main(int argc, char *argv[])
 						if ((new_fd = socket (AF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0)   
 					    	{
 							printf ("server: Error in creating socket for sending file \n");
-						      	return 0;
+						      	return;
 						}
 							
 						FD_SET(new_fd, &master); //Adding to master set

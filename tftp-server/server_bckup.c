@@ -45,9 +45,9 @@ char error_code []={	0 /*Not defined, see error message (if any)"*/,
 char cwd[100];
 
 // Send file 
-void tftp_sendfile (char *file_name, int sock, struct sockaddr_in client, char *transfer_mode, int tid)
+void tftp_sendfile (char *file_name, struct sockaddr_in client, char *transfer_mode, int tid)
 {
-	int len, client_len, opcode, ssize = 0, n, j;
+	int sock, len, client_len, opcode, ssize = 0, n, j;
 	struct timeval curr_time, time_now;
 	unsigned short int count = 0, rcount = 0, resend =0;
 	char filebuf[MAXDATASIZE], sendbuf[MAXDATASIZE + 4], recvbuf[MAXDATASIZE];
@@ -64,7 +64,14 @@ void tftp_sendfile (char *file_name, int sock, struct sockaddr_in client, char *
 	FILE *fp;                     	
 	strcpy (filename, file_name); 
 	strcpy (mode, transfer_mode);        
-		
+	
+	// Opening a new socket sending the file
+	if ((sock = socket (AF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0)   
+    	{
+		printf ("server: Error in creating socket for sending file \n");
+	      	return;
+	}
+	
 	// Error handling for mode
 	if (strncasecmp (mode, "octet", 5))    
 	{
@@ -221,7 +228,7 @@ void *get_in_addr(struct sockaddr *sa)
 
 int main(int argc, char *argv[])
 {
-    int sockfd, new_fd, sockmax, i, rv;  
+    int sockfd, rv;  
     struct addrinfo hints, *servinfo, *p;
     struct sockaddr_in client_addr; // connector's address information
     socklen_t client_size;
@@ -269,85 +276,62 @@ int main(int argc, char *argv[])
     freeaddrinfo(servinfo); // all done with this structure
 
     // FD_SET variables for select() 
-    fd_set master,read_fds;
+    fd_set read_fds;
 
-    // clear the master and temp sets
-    FD_ZERO(&master);    
+    // clear the temp sets
     FD_ZERO(&read_fds);
 
     // add the socket descriptor to the master set
-    FD_SET(sockfd, &master);
+    FD_SET(sockfd, &read_fds);
 
-    // keep track of the largest socket descriptor to use with select()
-    sockmax = sockfd; // so far, it's this one
-
-    printf("TFTP server started ....\n");
-    struct timeval tv;
-    tv.tv_sec = 5;
+    printf("TFTP server started....\n");
 
     while(1) 
-    {  // main accept() loop
-	read_fds = master;
-	if(select(sockmax+1,&read_fds,NULL,NULL,NULL) == -1) {
+    {  
+	// main accept() loop
+	if(select(sockfd+1,&read_fds,NULL,NULL,NULL) == -1) {
 	        printf("Error with select \n");
         	perror("select");
 	        exit(1);
     	}
+	
+	if(FD_ISSET(sockfd, &read_fds)) {
+		//Accept the new connection
+		client_size = sizeof client_addr;
+		/*clear the buffer */
+		memset (buf, 0, sizeof buf); 
+		 
+		if((numbytes = recvfrom (sockfd, buf, sizeof buf, MSG_DONTWAIT, (struct sockaddr *) &client_addr, (socklen_t *) & client_size)) < 0)
+		{
+			perror("server: Could not receive from client");
+			continue;
+		}
+		else {
+			printf("server: got connection from %s \n",inet_ntoa (client_addr.sin_addr));	
+			index = buf;          
+			index++; // moving past the first NULL packet
+			opcode = *index++;   
 
-	//Looping through all incoming socket connections 
-	for(i=0; i<=sockmax; i++) {
-		if(FD_ISSET(i, &read_fds)) {
-			if(i == sockfd) {				
-				//Accept the new connection
-				client_size = sizeof client_addr;
-				/*clear the buffer */
-				memset (buf, 0, sizeof buf); 
-				 
-				if((numbytes = recvfrom (sockfd, buf, sizeof buf, MSG_DONTWAIT, (struct sockaddr *) &client_addr, (socklen_t *) & client_size)) < 0)
-				{
-					perror("server: Could not receive from client");
-					continue;
-				}
-				else {
-					printf("server: got connection from %s \n",inet_ntoa (client_addr.sin_addr));	
-					index = buf;          
-					index++; // moving past the first NULL packet
-					opcode = *index++;   
-
-					if (opcode == RRQ )   // RRQ requests
-					{
-						// obtaining filename from the TFTP frame
-						strncpy (filename, index, sizeof (filename) - 1);  
-						// Moving the index further and parsing 1 null byte after filename
-						index += strlen (filename) + 1;    
-						// obtaining mode of TFTP file transfer (Octet/Netascii)
-						strncpy (mode, index, sizeof (mode) - 1);  
-						// Moving the index further 
-						index += strlen (mode) + 1; 
-						// Print decoded values from the TFTP frame       					
-						printf ("opcode: %x filename: %s packet size: %d mode: %s\n", opcode, filename, numbytes, mode);   
-		    				printf ("server: READ REQUEST\n");
-						// Opening a new socket sending the file
-						if ((new_fd = socket (AF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0)   
-					    	{
-							printf ("server: Error in creating socket for sending file \n");
-						      	return 0;
-						}
-							
-						FD_SET(new_fd, &master); //Adding to master set
-						if(new_fd > sockmax) {
-							sockmax = new_fd;
-						}
-
-						tftp_sendfile (filename, new_fd, client_addr, mode, ntohs (client_addr.sin_port));      
+			if (opcode == RRQ )   // RRQ requests
+		        {
+				// obtaining filename from the TFTP frame
+				strncpy (filename, index, sizeof (filename) - 1);  
+				// Moving the index further and parsing 1 null byte after filename
+			        index += strlen (filename) + 1;    
+				// obtaining mode of TFTP file transfer (Octet/Netascii)
+			        strncpy (mode, index, sizeof (mode) - 1);  
+				// Moving the index further 
+			        index += strlen (mode) + 1; 
+				// Print decoded values from the TFTP frame       					
+				printf ("opcode: %x filename: %s packet size: %d mode: %s\n", opcode, filename, numbytes, mode);   
+    				printf ("server: READ REQUEST\n");
+			        tftp_sendfile (filename, client_addr, mode, ntohs (client_addr.sin_port));      
 				
-					}			
-					else
-					{
-						// not read/write request
-						printf ("server: Invalid opcode: %x size: %d detected\n", opcode, numbytes);      
-					}
-				}
+		        }			
+			else
+		        {
+				// not read/write request
+			        printf ("server: Invalid opcode: %x size: %d detected\n", opcode, numbytes);      
 			}
 		}
 	}
