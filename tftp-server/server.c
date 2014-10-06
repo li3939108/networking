@@ -282,9 +282,9 @@ int main(int argc, char *argv[])
     sockmax = sockfd; // so far, it's this one
 
     printf("TFTP server started ....\n");
-    struct timeval tv;
+/*    struct timeval tv;
     tv.tv_sec = 5;
-
+*/
     while(1) 
     {  // main accept() loop
 	read_fds = master;
@@ -297,7 +297,7 @@ int main(int argc, char *argv[])
 	//Looping through all incoming socket connections 
 	for(i=0; i<=sockmax; i++) {
 		if(FD_ISSET(i, &read_fds)) {
-			if(i == sockfd) {				
+			if(i == sockfd) {
 				//Accept the new connection
 				client_size = sizeof client_addr;
 				/*clear the buffer */
@@ -334,10 +334,10 @@ int main(int argc, char *argv[])
 						      	return 0;
 						}
 							
-						FD_SET(new_fd, &master); //Adding to master set
+						/*FD_SET(new_fd, &master); //Adding to master set
 						if(new_fd > sockmax) {
 							sockmax = new_fd;
-						}
+						}*/
 
 						tftp_sendfile (filename, new_fd, client_addr, mode, ntohs (client_addr.sin_port));      
 				
