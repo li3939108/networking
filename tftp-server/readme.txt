@@ -1,4 +1,4 @@
-ECEN602 HW1 Programming Assignment
+ECEN602 HW2 Programming Assignment
 ----------------------------------
 Team Number: 30
 Member 1 # Raghavan S V (UIN: 722009006)
