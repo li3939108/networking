@@ -1,29 +1,32 @@
-ECEN602 HW2 Programming Assignment (TFTP protocol implementation)
------------------------------------------------------------------
-
+ECEN602 HW1 Programming Assignment
+----------------------------------
 Team Number: 30
-1.  
-2. 
+Member 1 # Raghavan S V (UIN: 722009006)
+Member 2 # Hari Kishan Srikonda (UIN: 924002529)
+Member 3 # Jiaju Shi (UIN: 823001803)
 ---------------------------------------
-
 Description/Comments:
 --------------------
-1. 
-2. 
-3.
+The package contains the implementation of the TFTP (Trivial File Transfer Protocol) server. Only READ requests can be issued to this TFTP server.
 
-Notes from your TA:
--------------------
-1. You need to submit TFTP server file along with makefile and readme.txt to Google Drive folder shared to each team.
-2. Don't create new folder for submission. Upload your files to teamxx/HW2.
-3. I have shared 'temp' folder for your personal (or team) use. You can do compilation or code share among team members using this folder.
-4. While submitting, delete all these files and upload only server file, makefile and readme.txt
-5. Grading is automated for this programming assignment. You can run "python grading_hw2.py <server_ip> <server_port>" to check your score. 
-6. Make sure to check file transfer from different machines. While grading, I'll use different machines for your server and tftp client.
+Initially, the socket structure for the TFTP server is set up and its parameters are initialized. After the bind function, the server is set up and ready to receive READ request from the tftp client.
 
-All the best. 
+The server essentially has the main following functions: 
+  
+  a. RECEIVE READ requests from the tftp client. 
+  
+  b. SEND DATA packets (containing the file data) or ERROR packet (say, in case the file does not exist).
+
+  c. Maintain a window of packets and have timers for each packet in the window. 
+
+  d. Receive ACK from the tftp client, and advance the window. 
+
+  e. In case of timeout for a particular packet, retransmit that particular packet alone.
+
+  f. It also handles concurrent client transfers.
+
 
 Unix command for starting server:
 ------------------------------------------
-./server SERVER_IP SERVER_PORT
+./server SERVER_IP SERVER_PORT 
 
