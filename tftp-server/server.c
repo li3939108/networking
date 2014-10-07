@@ -45,9 +45,9 @@ char error_code []={	0 /*Not defined, see error message (if any)"*/,
 char cwd[100];
 
 // Send file 
-void tftp_sendfile (char *file_name, int sock, struct sockaddr_in client, char *transfer_mode, int tid)
+void tftp_sendfile (char *file_name, int org_sock, struct sockaddr_in client, char *transfer_mode, int tid)
 {
-	int len, client_len, opcode, ssize = 0, n, j;
+	int len, sock, client_len, opcode, ssize = 0, n, j;
 	struct timeval curr_time, time_now;
 	unsigned short int count = 0, rcount = 0, resend =0;
 	char filebuf[MAXDATASIZE], sendbuf[MAXDATASIZE + 4], recvbuf[MAXDATASIZE];
@@ -60,6 +60,13 @@ void tftp_sendfile (char *file_name, int sock, struct sockaddr_in client, char *
         else
         	perror("server: getcwd() error");
 	
+	// Opening a new socket sending the file
+	if ((sock = socket (AF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0)   
+    	{
+		printf ("server: Error in creating socket for sending file \n");
+	      	return;
+	}
+
 	// pointer to the file we will be sending
 	FILE *fp;                     	
 	strcpy (filename, file_name); 
@@ -113,7 +120,7 @@ void tftp_sendfile (char *file_name, int sock, struct sockaddr_in client, char *
 		memcpy ((char *) sendbuf + 4, filebuf, ssize);
 		len = 4 + ssize;
 		count = ntohs(count);
-		printf ("server: Sending packet # %d (length: %d file chunk: %d)\n", count, len, ssize);
+		//printf ("server: Sending packet # %d (length: %d file chunk: %d)\n", count, len, ssize);
 
 		// Sending the data packet
 		if (sendto (sock, sendbuf, len, 0, (struct sockaddr *) &client, sizeof (client)) != len) {
@@ -173,7 +180,7 @@ void tftp_sendfile (char *file_name, int sock, struct sockaddr_in client, char *
 				        }
 				}
 	  			else {
-					printf ("server: ACK successfully received for block (#%d)\n", rcount);
+					//printf ("server: ACK successfully received for block (#%d)\n", rcount);
 	      				break;
 	    			}
 			}
@@ -191,8 +198,9 @@ void tftp_sendfile (char *file_name, int sock, struct sockaddr_in client, char *
 		// Obtain current time
 		if (j == RETRIES) {
 			printf ("server: ACK Timeout. Client did not respond for 5 seconds!! Aborting transfer\n");	
-			fclose (fp);
+			fclose (fp);	
 			close(sock);
+			//FD_CLR(sock,&master);
 			return;
 		}
 
@@ -203,6 +211,7 @@ void tftp_sendfile (char *file_name, int sock, struct sockaddr_in client, char *
     	}
   	fclose (fp);
 	close (sock);
+	//FD_CLR(sock,&master);
 	printf ("server: File sent successfully\n");
 	return;
 }
@@ -328,19 +337,17 @@ int main(int argc, char *argv[])
 						printf ("opcode: %x filename: %s packet size: %d mode: %s\n", opcode, filename, numbytes, mode);   
 		    				printf ("server: READ REQUEST\n");
 						// Opening a new socket sending the file
-						if ((new_fd = socket (AF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0)   
+						/*if ((new_fd = socket (AF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0)   
 					    	{
 							printf ("server: Error in creating socket for sending file \n");
 						      	return 0;
-						}
+						}*/
 							
 						/*FD_SET(new_fd, &master); //Adding to master set
 						if(new_fd > sockmax) {
 							sockmax = new_fd;
-						}*/
-
-						tftp_sendfile (filename, new_fd, client_addr, mode, ntohs (client_addr.sin_port));      
-				
+					 	}*/	
+						tftp_sendfile (filename, sockfd, client_addr, mode, ntohs (client_addr.sin_port));
 					}			
 					else
 					{
@@ -349,6 +356,10 @@ int main(int argc, char *argv[])
 					}
 				}
 			}
+			/*else {
+				 
+				FD_CLR(new_fd,&master); 		
+			}*/
 		}
 	}
    }
