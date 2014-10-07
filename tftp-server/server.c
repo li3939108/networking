@@ -231,7 +231,7 @@ void *get_in_addr(struct sockaddr *sa)
 
 int main(int argc, char *argv[])
 {
-    int sockfd, sockmax, i, rv, len, sock, client_len, ssize = 0, n, j, numbytes, opcode; 
+    int sockfd, sockmax, i, rv, len, sock, client_len, ssize = 0, n, numbytes, opcode; 
     unsigned short int count[MAXCLIENTS], rcount = 0, resend =0; 
     struct addrinfo hints, *servinfo, *p;
     struct sockaddr_in client_addr, cl_addr[MAXCLIENTS], ack; 
@@ -420,21 +420,21 @@ int main(int argc, char *argv[])
 						// Send Error
 						if (opcode > ERR) {						
 							len = sprintf ((char *) recvbuf, "%c%c%c%cIllegal operation%c", 0x00, ERR, 0x00, error_code[4], 0x00);
-							if (sendto (i, recvbuf, len, 0, (struct sockaddr *) &ack, sizeof (ack)) != len)      
+							if (sendto (i, recvbuf, len, 0, (struct sockaddr *) &cl_addr[i-sockfd-1], sizeof (cl_addr[i-sockfd-1])) != len)      
 			   	                        	printf ("server: Error in ACK packet not sent correctly\n");
 						}
 					}
 		  			else {
 						printf ("server: ACK successfully received for block (#%d)\n", rcount);
-						FD_SET(i,&master_write);
 		    			}
-				}		 					 	 		
+				}
+				FD_SET(i,&master_write);		 					 	 		
 			}
 		}
 		if (FD_ISSET(i,&write_fds)) {
 			if(resend == 1) {
 				// resending data packet
-				if (sendto (i, sendbuf, len, 0, (struct sockaddr *) &cl_addr[sock-sockfd-1], sizeof (cl_addr[sock-sockfd-1])) != len) {
+				if (sendto (i, sendbuf, len, 0, (struct sockaddr *) &cl_addr[i-sockfd-1], sizeof (cl_addr[i-sockfd-1])) != len) {
 					printf ("server: Error resending data packet\n");
 					continue;
 	    			}
@@ -453,7 +453,7 @@ int main(int argc, char *argv[])
 			printf ("server: Sending packet # %d (length: %d file chunk: %d)\n", count[i-sockfd-1], len, ssize);
 
 			// Sending the data packet
-			if (sendto (i, sendbuf, len, 0, (struct sockaddr *) &cl_addr[sock-sockfd-1], sizeof (cl_addr[sock-sockfd-1])) != len) {
+			if (sendto (i, sendbuf, len, 0, (struct sockaddr *) &cl_addr[i-sockfd-1], sizeof (cl_addr[i-sockfd-1])) != len) {
 				printf("server: data packet not sent correctly\n");
 				continue;
 			}	
