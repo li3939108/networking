@@ -58,7 +58,7 @@ void *get_in_addr(struct sockaddr *sa)
 int main(int argc, char *argv[])
 {
     int sockfd, sockmax, i, rv, len, sock, client_len, ssize = 0, n, numbytes, opcode; 
-    unsigned short int count[MAXCLIENTS], rcount = 0, resend =0; 
+    unsigned short int count[MAXCLIENTS], rcount = 0, resend [MAXCLIENTS]; 
     struct addrinfo hints, *servinfo, *p;
     struct sockaddr_in client_addr, cl_addr[MAXCLIENTS], ack; 
     socklen_t client_size;
@@ -188,6 +188,8 @@ int main(int argc, char *argv[])
 						strncat (file_path, filename, sizeof (file_path) - 1);  
 						fp[sock-sockfd-1] = fopen (file_path, "r");
 						cl_addr[sock-sockfd-1] = client_addr;
+						resend[sock-sockfd-1] = 0;
+						time_now[sock-sockfd-1].tv_sec = 0;
 						if (fp[sock-sockfd-1] == NULL) {              
 							printf ("server: file not found (%s)\n", file_path);
 							len = sprintf ((char *) sendbuf, "%c%c%c%cFile not found (%s)%c", 0x00, ERR, 0x00, error_code[1], file_path, 0x00);
@@ -218,9 +220,9 @@ int main(int argc, char *argv[])
 			// From a client socket
 			else {
 				client_len = sizeof (ack);
-				resend = 0;
+				resend[i-sockfd-1] = 0;
 				if((n = recvfrom (i, recvbuf, sizeof (recvbuf), MSG_DONTWAIT, (struct sockaddr *) &ack, (socklen_t *) & client_len)) < 0)
-					resend = 0;
+					resend[i-sockfd-1] = 1;
 				else {
 					// Maybe someone connected to us
 		  			if (cl_addr[i-sockfd-1].sin_addr.s_addr != ack.sin_addr.s_addr) {
@@ -263,7 +265,7 @@ int main(int argc, char *argv[])
 		}
 		if (FD_ISSET(i,&write_fds)) {
 			ssize = fread (filebuf, 1, MAXDATASIZE, fp[i-sockfd-1]);
-			if(resend == 1) {
+			if(resend[i-sockfd-1] == 1) {
 				// resending data packet
 				fseek (fp[i-sockfd-1], -ssize , SEEK_CUR);
 				ssize = fread (filebuf, 1, MAXDATASIZE, fp[i-sockfd-1]);		
@@ -294,8 +296,15 @@ int main(int argc, char *argv[])
 		}  
 		// Continue to check current time to ensure ACKs don't timeout
 		gettimeofday(&curr_time, NULL);
-		if((i>sockfd) && ((curr_time.tv_sec - time_now[i-sockfd-1].tv_sec)*1000000 + curr_time.tv_usec - time_now[i-sockfd-1].tv_usec) >= ACK_TIMEOUT)
-			resend = 1;
+		if((i>sockfd) && (ack[i-sockfd-1]= 0) && ((curr_time.tv_sec - time_now[i-sockfd-1].tv_sec)*1000000 + curr_time.tv_usec - time_now[i-sockfd-1].tv_usec) >= ACK_TIMEOUT) {
+			resend[i-sockfd-1] = 1;
+			printf("server: Current Time: %d %d, Sent Time: %d %d, Packet: %d\n",curr_time.tv_sec,curr_time.tv_usec,time_now[i-sockfd-1].tv_sec,time_now[i-sockfd-1].tv_usec,count[i-sockfd-1]);
+			FD_SET(i,&master_write);
+		}
+		/*else {
+			resend = 0;
+		//	time_now[i-sockfd-1].tv_sec = 0;
+		}*/
 	}
    }
    return 0;
