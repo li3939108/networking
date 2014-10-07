@@ -62,7 +62,7 @@ int main(int argc, char *argv[])
     struct addrinfo hints, *servinfo, *p;
     struct sockaddr_in client_addr, cl_addr[MAXCLIENTS], ack; 
     socklen_t client_size;
-    struct timeval curr_time, time_now;
+    struct timeval curr_time, time_now[MAXCLIENTS];
     char buf[MAXDATASIZE], filebuf[MAXDATASIZE], sendbuf[MAXDATASIZE + 4], recvbuf[MAXDATASIZE];
     char filename[100], mode[10], file_path[150], *index, *ptr;
 
@@ -131,14 +131,14 @@ int main(int argc, char *argv[])
     {  // main accept() loop
 	read_fds = master;
 	write_fds = master_write;
-	if(select(sockmax+1,&read_fds,&write_fds,NULL,NULL) == -1) {
+	if(select(sockmax+1,&read_fds,&write_fds,NULL,NULL)== -1) {
 	        printf("Error with select \n");
         	perror("select");
 	        exit(1);
     	}
 	
 	//Looping through all incoming socket connections 
-	for(i=0; i<=sockmax; i++) {
+	for(i=sockfd; i<=sockmax; i++) {
 		if(FD_ISSET(i, &read_fds)) {
 			if(i == sockfd) {
 				//Accept the new connection
@@ -219,19 +219,8 @@ int main(int argc, char *argv[])
 			else {
 				client_len = sizeof (ack);
 				resend = 0;
-				// per packet ACK timeout		
-				gettimeofday(&time_now, NULL);
-				do {
-					if((n = recvfrom (i, recvbuf, sizeof (recvbuf), MSG_DONTWAIT, (struct sockaddr *) &ack, (socklen_t *) & client_len)) > 0)
-						break;
-					// Continue to check current time to ensure ACKs don't timeout
-					gettimeofday(&curr_time, NULL);
-
-				}while (((curr_time.tv_sec - time_now.tv_sec)*1000000 + curr_time.tv_usec - time_now.tv_usec) < ACK_TIMEOUT);
-
-				if (n < 0 )
-					resend = 1;
-
+				if((n = recvfrom (i, recvbuf, sizeof (recvbuf), MSG_DONTWAIT, (struct sockaddr *) &ack, (socklen_t *) & client_len)) < 0)
+					resend = 0;
 				else {
 					// Maybe someone connected to us
 		  			if (cl_addr[i-sockfd-1].sin_addr.s_addr != ack.sin_addr.s_addr) {
@@ -259,23 +248,32 @@ int main(int argc, char *argv[])
 					}
 		  			else {
 						printf ("server: ACK successfully received for block (#%d)\n", rcount);
+						if (feof(fp[i-sockfd-1])) {
+						    	fclose (fp[i-sockfd-1]);
+							count[i-sockfd-1] = 0;
+							close (i);
+							FD_CLR(i,&master);
+							printf ("server: File sent successfully\n");				
+							continue;
+						}
 		    			}
 				}
 				FD_SET(i,&master_write);		 					 	 		
 			}
 		}
 		if (FD_ISSET(i,&write_fds)) {
+			ssize = fread (filebuf, 1, MAXDATASIZE, fp[i-sockfd-1]);
 			if(resend == 1) {
 				// resending data packet
-				if (sendto (i, sendbuf, len, 0, (struct sockaddr *) &cl_addr[i-sockfd-1], sizeof (cl_addr[i-sockfd-1])) != len) {
-					printf ("server: Error resending data packet\n");
-					continue;
-	    			}
-	    			printf ("server: ACK lost. Resending Packet: %d\n", count[i-sockfd-1]);
-				continue;					
+				fseek (fp[i-sockfd-1], -ssize , SEEK_CUR);
+				ssize = fread (filebuf, 1, MAXDATASIZE, fp[i-sockfd-1]);		
+	 			printf ("server: ACK lost. Resending Packet: %d\n", count[i-sockfd-1]);
 			}
-			ssize = fread (filebuf, 1, MAXDATASIZE, fp[i-sockfd-1]);
-			count[i-sockfd-1]++; 
+			else {
+				count[i-sockfd-1]++; 
+				printf ("server: Sending packet # %d (length: %d file chunk: %d)\n", count[i-sockfd-1], ssize+4, ssize);
+			}
+
 			count[i-sockfd-1] = htons(count[i-sockfd-1]); 
 			ptr = (char *) &count[i-sockfd-1];
 			sprintf ((char *) sendbuf, "%c%c", 0x00, DATA);  
@@ -283,23 +281,21 @@ int main(int argc, char *argv[])
 			memcpy ((char *) sendbuf + 4, filebuf, ssize);
 			len = 4 + ssize;
 			count[i-sockfd-1] = ntohs(count[i-sockfd-1]);
-			printf ("server: Sending packet # %d (length: %d file chunk: %d)\n", count[i-sockfd-1], len, ssize);
 
 			// Sending the data packet
 			if (sendto (i, sendbuf, len, 0, (struct sockaddr *) &cl_addr[i-sockfd-1], sizeof (cl_addr[i-sockfd-1])) != len) {
 				printf("server: data packet not sent correctly\n");
 				continue;
 			}	
+			// per packet ACK timeout		
+			gettimeofday(&time_now[i-sockfd-1], NULL);
 			FD_CLR(i,&master_write);
-			if (ssize != MAXDATASIZE) {
-			    	fclose (fp[i-sockfd-1]);
-				count[i-sockfd-1] = 0;
-				close (i);
-				FD_CLR(i,&master);
-				printf ("server: File sent successfully\n");				
-			}
 			memset (filebuf, 0, sizeof (filebuf));
-		}    
+		}  
+		// Continue to check current time to ensure ACKs don't timeout
+		gettimeofday(&curr_time, NULL);
+		if((i>sockfd) && ((curr_time.tv_sec - time_now[i-sockfd-1].tv_sec)*1000000 + curr_time.tv_usec - time_now[i-sockfd-1].tv_usec) >= ACK_TIMEOUT)
+			resend = 1;
 	}
    }
    return 0;
