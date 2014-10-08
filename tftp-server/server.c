@@ -62,7 +62,7 @@ int main(int argc, char *argv[])
     struct addrinfo hints, *servinfo, *p;
     struct sockaddr_in client_addr, cl_addr[MAXCLIENTS], ack; 
     socklen_t client_size;
-    struct timeval curr_time, time_now[MAXCLIENTS];
+    struct timeval curr_time, time_now;
     char buf[MAXDATASIZE], filebuf[MAXDATASIZE], sendbuf[MAXDATASIZE + 4], recvbuf[MAXDATASIZE];
     char filename[100], mode[10], file_path[150], *index, *ptr;
 
@@ -182,6 +182,24 @@ int main(int argc, char *argv[])
 							printf ("server: Error in creating socket for sending file \n");
 						      	continue;
 						}
+						// Error handling for mode
+						if (strncasecmp (mode, "octet", 5))    
+						{
+							if (strncasecmp (mode, "mail", 4) || strncasecmp (mode, "netascii", 8)) {
+						  		printf ("server: %s mode not supported \n ",mode);
+								len = sprintf ((char *) sendbuf, "%c%c%c%c(%s) mode not supported.%c", 0x00, ERR, 0x00, error_code[0], mode, 0x00);		     
+							}
+							else {
+								printf ("server: %s mode unrecognized \n ",mode);
+								len = sprintf ((char *) sendbuf, "%c%c%c%c(%s) mode unrecognized.%c", 0x00, ERR, 0x00, error_code[0], mode, 0x00);                    
+							}
+		
+							//Sending Error PCKT to client
+							if (sendto (sock, sendbuf, len, 0, (struct sockaddr *) &client_addr, sizeof (client_addr)) != len)     
+								printf("server: send mode error packet not sent correctly\n");
+			
+							continue;
+					    	}
 
 						//Appending the filename to the path
 						sprintf(file_path,"%s/",cwd);
@@ -189,7 +207,6 @@ int main(int argc, char *argv[])
 						fp[sock-sockfd-1] = fopen (file_path, "r");
 						cl_addr[sock-sockfd-1] = client_addr;
 						resend[sock-sockfd-1] = 0;
-						time_now[sock-sockfd-1].tv_sec = 0;
 						if (fp[sock-sockfd-1] == NULL) {              
 							printf ("server: file not found (%s)\n", file_path);
 							len = sprintf ((char *) sendbuf, "%c%c%c%cFile not found (%s)%c", 0x00, ERR, 0x00, error_code[1], file_path, 0x00);
@@ -220,9 +237,19 @@ int main(int argc, char *argv[])
 			// From a client socket
 			else {
 				client_len = sizeof (ack);
-				resend[i-sockfd-1] = 0;
-				if((n = recvfrom (i, recvbuf, sizeof (recvbuf), MSG_DONTWAIT, (struct sockaddr *) &ack, (socklen_t *) & client_len)) < 0)
-					resend[i-sockfd-1] = 1;
+				resend[i-sockfd-1] = 0;	
+				gettimeofday(&time_now, NULL);
+				do {
+					if((n = recvfrom (i, recvbuf, sizeof (recvbuf), MSG_DONTWAIT, (struct sockaddr *) &ack, (socklen_t *) & client_len)) > 0)
+						break;
+					// Continue to check current time to ensure ACKs don't timeout
+					gettimeofday(&curr_time, NULL);
+
+				}while (((curr_time.tv_sec - time_now.tv_sec)*1000000 + curr_time.tv_usec - time_now.tv_usec) < ACK_TIMEOUT);
+
+				if (n < 0 )
+					resend[i-sockfd-1] = 0;
+
 				else {
 					// Maybe someone connected to us
 		  			if (cl_addr[i-sockfd-1].sin_addr.s_addr != ack.sin_addr.s_addr) {
@@ -263,7 +290,7 @@ int main(int argc, char *argv[])
 				FD_SET(i,&master_write);		 					 	 		
 			}
 		}
-		if (FD_ISSET(i,&write_fds)) {
+		else if (FD_ISSET(i,&write_fds)) {
 			ssize = fread (filebuf, 1, MAXDATASIZE, fp[i-sockfd-1]);
 			if(resend[i-sockfd-1] == 1) {
 				// resending data packet
@@ -289,22 +316,9 @@ int main(int argc, char *argv[])
 				printf("server: data packet not sent correctly\n");
 				continue;
 			}	
-			// per packet ACK timeout		
-			gettimeofday(&time_now[i-sockfd-1], NULL);
 			FD_CLR(i,&master_write);
 			memset (filebuf, 0, sizeof (filebuf));
 		}  
-		// Continue to check current time to ensure ACKs don't timeout
-		gettimeofday(&curr_time, NULL);
-		if((i>sockfd) && (ack[i-sockfd-1]= 0) && ((curr_time.tv_sec - time_now[i-sockfd-1].tv_sec)*1000000 + curr_time.tv_usec - time_now[i-sockfd-1].tv_usec) >= ACK_TIMEOUT) {
-			resend[i-sockfd-1] = 1;
-			printf("server: Current Time: %d %d, Sent Time: %d %d, Packet: %d\n",curr_time.tv_sec,curr_time.tv_usec,time_now[i-sockfd-1].tv_sec,time_now[i-sockfd-1].tv_usec,count[i-sockfd-1]);
-			FD_SET(i,&master_write);
-		}
-		/*else {
-			resend = 0;
-		//	time_now[i-sockfd-1].tv_sec = 0;
-		}*/
 	}
    }
    return 0;
