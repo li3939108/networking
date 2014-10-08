@@ -16,6 +16,7 @@
 #include <arpa/inet.h>
 #include <sys/wait.h>
 #include <signal.h>
+#include <pthread.h>
 
 #define BACKLOG 10     // how many pending connections queue will hold
 
@@ -44,9 +45,16 @@ char error_code []={	0 /*Not defined, see error message (if any)"*/,
 
 char cwd[100];
 
+struct read_args {
+	char file[100];
+	struct sockaddr_in c;
+	char mode[20];
+};
 // Send file 
-void tftp_sendfile (char *file_name, struct sockaddr_in client, char *transfer_mode, int tid)
-{
+void tftp_sendfile (void * send_arguments) {
+	
+	struct read_args *args = send_arguments;
+	struct sockaddr_in client = args->c;
 	int sock, len, client_len, opcode, ssize = 0, n, j;
 	struct timeval curr_time, time_now;
 	unsigned short int count = 0, rcount = 0, resend =0;
@@ -62,8 +70,8 @@ void tftp_sendfile (char *file_name, struct sockaddr_in client, char *transfer_m
 	
 	// pointer to the file we will be sending
 	FILE *fp;                     	
-	strcpy (filename, file_name); 
-	strcpy (mode, transfer_mode);        
+	strcpy (filename, args->file); 
+	strcpy (mode, args->mode);        
 	
 	// Opening a new socket sending the file
 	if ((sock = socket (AF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0)   
@@ -151,17 +159,6 @@ void tftp_sendfile (char *file_name, struct sockaddr_in client, char *transfer_m
 					j--;      
 					continue;
 	    			}
-	      			// Obtain the right port
-				if (tid != ntohs (client.sin_port)) {
-					printf ("Error recieving file (data from invalid tid)\n");
-					len = sprintf ((char *) recvbuf, "%c%c%c%cBad/Unknown TID%c", 0x00, ERR, 0x00, error_code[5], 0x00);
-					// Send error packet
-					if (sendto (sock, recvbuf, len, 0, (struct sockaddr *) &client, sizeof (client)) != len) 
-						printf ("server: Port error packet not sent correctly\n");
-		
-	      				j--;
-					continue; 
-	    			}
 				// Decode received message correctly
 				index = (char *) recvbuf;  
 				index++; // moving past first null byte
@@ -203,7 +200,7 @@ void tftp_sendfile (char *file_name, struct sockaddr_in client, char *transfer_m
 			return;
 		}
 
-	      	if (ssize != MAXDATASIZE)
+	      	if (feof(fp))
 			break;
 
 		memset (filebuf, 0, sizeof (filebuf));    
@@ -323,9 +320,13 @@ int main(int argc, char *argv[])
 				// Moving the index further 
 			        index += strlen (mode) + 1; 
 				// Print decoded values from the TFTP frame       					
-				printf ("opcode: %x filename: %s packet size: %d mode: %s\n", opcode, filename, numbytes, mode);   
     				printf ("server: READ REQUEST\n");
-			        tftp_sendfile (filename, client_addr, mode, ntohs (client_addr.sin_port));      
+				struct read_args send_args;
+				strcpy(send_args.file,filename);
+			        send_args.c = client_addr;
+			        strcpy(send_args.mode, mode);
+				pthread_t client_t;
+			        pthread_create(&client_t, NULL, (void*(*)(void*)) tftp_sendfile, (void*)&send_args);      
 				
 		        }			
 			else

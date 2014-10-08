@@ -45,6 +45,27 @@ char error_code []={	0 /*Not defined, see error message (if any)"*/,
 
 char cwd[100]; /* The PATH to the current working directory */
 
+struct time_args {
+    int so;
+};	
+// Timeouts using Pthread
+void ack_timeout(void * send_args) {
+	struct time_args *args = send_args;
+	struct sockaddr_in ack;
+	int client_len,n;
+	client_len = sizeof (ack);
+	gettimeofday(&time_now, NULL);
+	do {
+		if((n = recvfrom (args->so, recvbuf, sizeof (recvbuf), MSG_DONTWAIT, (struct sockaddr *) &ack, (socklen_t *) & client_len)) > 0)
+			break;
+		// Continue to check current time to ensure ACKs don't timeout
+		gettimeofday(&curr_time, NULL);
+
+	}while (((curr_time.tv_sec - time_now.tv_sec)*1000000 + curr_time.tv_usec - time_now.tv_usec) < ACK_TIMEOUT);
+	if(n < 0)
+		//resend this
+}    
+
 // get sockaddr, IPv4 or IPv6:
 void *get_in_addr(struct sockaddr *sa)
 {
