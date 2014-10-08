@@ -16,6 +16,7 @@
 #include <arpa/inet.h>
 #include <sys/wait.h>
 #include <signal.h>
+#include <pthread.h>
 
 #define BACKLOG 10     // how many pending connections queue will hold
 
@@ -44,12 +45,15 @@ char error_code []={	0 /*Not defined, see error message (if any)"*/,
 #define MAXCLIENTS 50 /* Assume a maximum of 50 clients */
 
 char cwd[100]; /* The PATH to the current working directory */
+fd_set master, master_write, read_fds, write_fds ;
 
 struct time_args {
     int so;
 };	
 // Timeouts using Pthread
 void ack_timeout(void * send_args) {
+	char recvbuf[MAXDATASIZE];
+    	struct timeval curr_time, time_now;
 	struct time_args *args = send_args;
 	struct sockaddr_in ack;
 	int client_len,n;
@@ -62,8 +66,10 @@ void ack_timeout(void * send_args) {
 		gettimeofday(&curr_time, NULL);
 
 	}while (((curr_time.tv_sec - time_now.tv_sec)*1000000 + curr_time.tv_usec - time_now.tv_usec) < ACK_TIMEOUT);
-	if(n < 0)
-		//resend this
+	printf("In thread \n");
+	/*if (n<0) {
+		FD_SET(args->so,&write_fds);
+	}*/		
 }    
 
 // get sockaddr, IPv4 or IPv6:
@@ -131,7 +137,7 @@ int main(int argc, char *argv[])
     freeaddrinfo(servinfo); // all done with this structure
 
     // FD_SET variables for select() 
-    fd_set master, master_write, read_fds, write_fds ;
+    //fd_set master, master_write, read_fds, write_fds ;
 
     // clear the master and temp sets
     FD_ZERO(&master);    
@@ -338,7 +344,11 @@ int main(int argc, char *argv[])
 				continue;
 			}	
 			FD_CLR(i,&master_write);
+			struct time_args t_arg;
+			t_arg.so = i;
 			memset (filebuf, 0, sizeof (filebuf));
+			pthread_t sent;
+			pthread_create(&sent, NULL, (void*(*)(void*))ack_timeout, (void*) &t_arg);
 		}  
 	}
    }
