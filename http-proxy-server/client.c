@@ -89,15 +89,44 @@ int main(int argc, char const *argv[])
 	printf("client: connecting to %s\n", s);
 
 	freeaddrinfo(servinfo); // all done with this structure
-	 if ((numbytes = recv(sockfd, buf, MAXDATASIZE-1, 0)) == -1) {
-		perror("recv");
+	// FD_SET tmp variable for select() 
+	fd_set tmp;
+
+	while(1)
+	{
+	    FD_ZERO(&tmp);
+	    FD_SET(0,&tmp);
+	    FD_SET(sockfd,&tmp);
+
+	    if(select(sockfd+1,&tmp,NULL,NULL,NULL) == -1) {
+		printf("Error with select \n");
+		perror("select");
 		exit(1);
-	 }
+	    }
+	    
+	    if(FD_ISSET(0,&tmp))
+	    {
+		char query[MAXDATASIZE] = { }; /* = "GET / HTTP/1.0\r\n" "Host: www.google.com\r\n" "\r\n"*/
+		sprintf(query, "GET / HTTP/1.0\r\nHost: %s\r\n\r\n",argv[3]);		
+		if (send(sockfd, query, sizeof(query), 0) == -1){
+		printf("Error sending\n");
+		perror("send");
+	    	}
+	    }
+	    
+	    if(FD_ISSET(sockfd,&tmp))
+	    {
+		if ((numbytes = recv(sockfd, buf,sizeof(buf), 0)) == -1) {
+		    perror("recv");
+	     	       exit(1);
+		}
 
-	buf[numbytes] = '\0';
+		buf[numbytes] = '\0';
 
-	printf("client: received '%s'\n",buf);
-
+		printf("client: received '%s'\n",buf);
+	    }
+	}
+	
 	close(sockfd);
 
 
