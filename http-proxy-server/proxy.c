@@ -32,15 +32,16 @@ void *get_in_addr(struct sockaddr *sa)
 
 int main(int argc, char *argv[])
 {
-    int sockfd, sockmax, new_fd;  // listen on sock_fd, new connection on new_fd
+    int sockfd, sockmax, sock_req, new_fd;  // listen on sock_fd, new connection on new_fd
     struct addrinfo hints, *servinfo, *p;
     struct sockaddr_storage their_addr; // connector's address information
+    struct sockaddr_in host_addr;
     socklen_t sin_size;
-    int yes=1;
+    struct hostent *host;
+    int yes=1, port;
     char s[INET6_ADDRSTRLEN];
-    int rv,i,j;
-    int numbytes;
-    char flag,buf[MAXDATASIZE], url[MAXDATASIZE], prot[10], http[MAXDATASIZE];
+    int rv,i,n,flag,numbytes;
+    char *tkn, buf[MAXDATASIZE], url[MAXDATASIZE], prot[10], http[MAXDATASIZE];
     char *usrns[atoi(argv[3])];
  
     for(i=0; i< atoi(argv[3]); i++)
@@ -164,19 +165,87 @@ int main(int argc, char *argv[])
 		                	FD_CLR(i, &master); // remove from master set
 		            	} 
 				else {
-				        // we got some data from a client	
+				        // we got some data from a client
+					tkn = NULL;
 					buf[numbytes] = '\0';
-					sprintf(prot,"http://");
-					sscanf(buf,"%s %s %s",http,url,prot);
+					sprintf(url,"http://");
+					sscanf(buf,"%s %s %s",http,url+7,prot);
 					if(((strncmp(http,"GET",3)==0))&&(strncmp(prot,HTTP,8)==0)) {
 						strcpy(http,url);
 						flag=0;  
 						for(i=7;i<strlen(url);i++) {
 							if(url[i]==':') {
-							flag=1;
-							break;
+								flag=1;
+								break;
 							}
 						}
+						tkn=strtok(url,"//");
+						if(flag==0)
+						{ 
+							port=80;
+							tkn=strtok(NULL,"/");
+						}
+						else
+						{
+							tkn=strtok(NULL,":");
+						}  
+						sprintf(url,"%s",tkn);
+						printf("server: host = %s",url);
+						host=gethostbyname(url);
+						   
+						if(flag==1)
+						{
+							tkn=strtok(NULL,"/");
+							port=atoi(tkn);
+						}
+						   	   
+						strcat(http,"^]");
+						tkn=strtok(http,"//");
+						tkn=strtok(NULL,"/");
+						if(tkn!=NULL)
+							tkn=strtok(NULL,"^]");
+						
+						printf("server: path = %s\tPort = %d\n",tkn,port);
+						   
+						bzero((char*)&host_addr,sizeof(host_addr));
+						host_addr.sin_port=htons(port);
+						host_addr.sin_family=AF_INET;
+						bcopy((char*)host->h_addr,(char*)&host_addr.sin_addr.s_addr,host->h_length);
+						   
+						sock_req = socket(AF_INET,SOCK_STREAM,IPPROTO_TCP);
+						new_fd=connect(sock_req,(struct sockaddr*)&host_addr,sizeof(struct sockaddr));
+						sprintf(buf,"\nConnected to %s  IP - %s\n",url,inet_ntoa(host_addr.sin_addr));
+						if(new_fd<0)
+							perror("server: Error in connecting to remote server");
+						   
+						printf("server: %s\n",buf);
+						//send(newsockfd,buffer,strlen(buffer),0);
+						bzero((char*)buf,sizeof(buf));
+
+						if(tkn!=NULL)
+							sprintf(buf,"GET /%s %s\r\nHost: %s\r\nConnection: close\r\n\r\n",tkn,prot,url);
+
+						else
+							sprintf(buf,"GET / %s\r\nHost: %s\r\nConnection: close\r\n\r\n",prot,url);
+						 
+						 
+						n=send(sock_req,buf,strlen(buf),0);
+						printf("server: %s\n",buf);
+						if(n<0)
+							perror("Error writing to socket");
+						else{
+							do
+							{
+								bzero((char*)buf,500);
+								n=recv(sock_req,buf,500,0);
+								if(!(n<=0))
+									send(i,buf,n,0);
+							}while(n>0);
+						}
+					}
+					else
+					{
+						send(new_fd,"400 : BAD REQUEST\nONLY HTTP REQUESTS ALLOWED",18,0);
 					}
 				}
 			}
