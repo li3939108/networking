@@ -42,14 +42,10 @@ int main(int argc, char *argv[])
     char s[INET6_ADDRSTRLEN];
     int rv,i,n,flag,numbytes;
     char *tkn, buf[MAXDATASIZE], url[MAXDATASIZE], prot[10], http[MAXDATASIZE];
-    char *usrns[atoi(argv[3])];
- 
-    for(i=0; i< atoi(argv[3]); i++)
-	usrns[i] = NULL;
 
     //Checking specification of command line options
-    if (argc != 4) {
-        fprintf(stderr,"usage: server server_ip server_port max_clients\n");
+    if (argc != 3) {
+        fprintf(stderr,"usage: server server_ip server_port \n");
         exit(1);
     }
 
@@ -149,7 +145,6 @@ int main(int argc, char *argv[])
 		            	// handle data from a client
 		            	if ((numbytes = recv(i, buf, sizeof buf, 0)) <= 0) {
 		                        // got error or connection closed by client
-		                        printf("server: %s LEFT the chat room \n",usrns[i-sockfd-1]);
 		                	if (numbytes == 0) {
 					        // connection closed
 				        	printf("server: socket %d hung up! Nothing received\n", i);
@@ -159,8 +154,6 @@ int main(int argc, char *argv[])
 				            	perror("recv");
 		                	}
 
-					free(usrns[i-sockfd-1]);
-					usrns[i-sockfd-1]=NULL;
 		                	close(i); // bye!
 		                	FD_CLR(i, &master); // remove from master set
 		            	} 
@@ -168,8 +161,14 @@ int main(int argc, char *argv[])
 				        // we got some data from a client
 					tkn = NULL;
 					buf[numbytes] = '\0';
-					sprintf(url,"http://");
-					sscanf(buf,"%s %s %s",http,url+7,prot);
+					char *temp;
+					temp=strtok(buf,":");
+					temp=strtok(NULL,"/");
+					strcpy(url,temp);
+					strcpy(http,"GET");
+					strcpy(prot,HTTP);
+					//sscanf(buf,"%s %s %s",http,prot);
+					printf("server: %s %s %s\n",http,url,prot);
 					if(((strncmp(http,"GET",3)==0))&&(strncmp(prot,HTTP,8)==0)) {
 						strcpy(http,url);
 						flag=0;  
@@ -205,7 +204,7 @@ int main(int argc, char *argv[])
 						if(tkn!=NULL)
 							tkn=strtok(NULL,"^]");
 						
-						printf("server: path = %s\tPort = %d\n",tkn,port);
+						printf("server: HostPath = %s\tPort = %d\n",tkn,port);
 						   
 						bzero((char*)&host_addr,sizeof(host_addr));
 						host_addr.sin_port=htons(port);
@@ -245,7 +244,7 @@ int main(int argc, char *argv[])
 					}
 					else
 					{
-						send(new_fd,"400 : BAD REQUEST\nONLY HTTP REQUESTS ALLOWED",18,0);
+						send(i,"400 : BAD REQUEST\nONLY HTTP REQUESTS ALLOWED",18,0);
 					}
 				}
 			}
