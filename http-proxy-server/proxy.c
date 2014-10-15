@@ -40,8 +40,8 @@ int main(int argc, char *argv[])
     struct hostent *host;
     int yes=1, port;
     char s[INET6_ADDRSTRLEN];
-    int rv,i,n,flag,numbytes;
-    char *tkn, buf[MAXDATASIZE], url[MAXDATASIZE], prot[10], http[MAXDATASIZE];
+    int rv,i,n,numbytes;
+    char buf[MAXDATASIZE], url[MAXDATASIZE], prot[10], http[MAXDATASIZE],path[MAXDATASIZE];
 
     //Checking specification of command line options
     if (argc != 3) {
@@ -159,52 +159,17 @@ int main(int argc, char *argv[])
 		            	} 
 				else {
 				        // we got some data from a client
-					tkn = NULL;
 					buf[numbytes] = '\0';
-					char *temp;
-					temp=strtok(buf,":");
-					temp=strtok(NULL,"/");
-					strcpy(url,temp);
-					strcpy(http,"GET");
-					strcpy(prot,HTTP);
-					//sscanf(buf,"%s %s %s",http,prot);
-					printf("server: %s %s %s\n",http,url,prot);
+					sscanf(buf,"%s %s %s\r\nHost: %s\r\n\r\n",http,path,prot,url);
+					printf("server: %s %s %s %s\n",http,path,prot,url);
 					if(((strncmp(http,"GET",3)==0))&&(strncmp(prot,HTTP,8)==0)) {
-						strcpy(http,url);
-						flag=0;  
-						for(i=7;i<strlen(url);i++) {
-							if(url[i]==':') {
-								flag=1;
-								break;
-							}
-						}
-						tkn=strtok(url,"//");
-						if(flag==0)
-						{ 
-							port=80;
-							tkn=strtok(NULL,"/");
-						}
-						else
-						{
-							tkn=strtok(NULL,":");
-						}  
-						sprintf(url,"%s",tkn);
-						printf("server: host = %s",url);
-						host=gethostbyname(url);
-						   
-						if(flag==1)
-						{
-							tkn=strtok(NULL,"/");
-							port=atoi(tkn);
-						}
-						   	   
-						strcat(http,"^]");
-						tkn=strtok(http,"//");
-						tkn=strtok(NULL,"/");
-						if(tkn!=NULL)
-							tkn=strtok(NULL,"^]");
 						
-						printf("server: HostPath = %s\tPort = %d\n",tkn,port);
+						port=80;
+						host=gethostbyname(url);
+						if(host==NULL)
+							goto badurl;
+					
+						printf("server: HostPath = %s%s\tPort = %d\n",url,path,port);
 						   
 						bzero((char*)&host_addr,sizeof(host_addr));
 						host_addr.sin_port=htons(port);
@@ -213,30 +178,21 @@ int main(int argc, char *argv[])
 						   
 						sock_req = socket(AF_INET,SOCK_STREAM,IPPROTO_TCP);
 						new_fd=connect(sock_req,(struct sockaddr*)&host_addr,sizeof(struct sockaddr));
-						sprintf(buf,"\nConnected to %s  IP - %s\n",url,inet_ntoa(host_addr.sin_addr));
+						printf("server: Connected to %s IP - %s\n\n",url,inet_ntoa(host_addr.sin_addr));
 						if(new_fd<0)
 							perror("server: Error in connecting to remote server");
 						   
-						printf("server: %s\n",buf);
-						//send(newsockfd,buffer,strlen(buffer),0);
 						bzero((char*)buf,sizeof(buf));
-
-						if(tkn!=NULL)
-							sprintf(buf,"GET /%s %s\r\nHost: %s\r\nConnection: close\r\n\r\n",tkn,prot,url);
-
-						else
-							sprintf(buf,"GET / %s\r\nHost: %s\r\nConnection: close\r\n\r\n",prot,url);
-						 
+						sprintf(buf,"GET %s %s\r\nHost: %s\r\nConnection: close\r\n\r\n",path,prot,url);			 
 						 
 						n=send(sock_req,buf,strlen(buf),0);
-						printf("server: %s\n",buf);
 						if(n<0)
 							perror("Error writing to socket");
 						else{
 							do
 							{
-								bzero((char*)buf,500);
-								n=recv(sock_req,buf,500,0);
+								bzero((char*)buf,sizeof(buf));
+								n=recv(sock_req,buf,sizeof(buf),0);
 								if(!(n<=0))
 									send(i,buf,n,0);
 							}while(n>0);
@@ -244,7 +200,8 @@ int main(int argc, char *argv[])
 					}
 					else
 					{
-						send(i,"400 : BAD REQUEST\nONLY HTTP REQUESTS ALLOWED",18,0);
+						badurl:
+						send(i,"400 : BAD REQUEST ONLY HTTP REQUESTS ALLOWED",18,0);
 					}
 				}
 			}

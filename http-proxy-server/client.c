@@ -107,6 +107,7 @@ int main(int argc, char const *argv[])
 	    if(FD_ISSET(0,&tmp))
 	    {
 		char query[MAXDATASIZE] = { }; /* = "GET / HTTP/1.0\r\n" "Host: www.google.com\r\n" "\r\n"*/
+		printf("client: sending ... ");
 		sprintf(query, "GET / HTTP/1.0\r\nHost: %s\r\n\r\n",argv[3]);		
 		if (send(sockfd, query, sizeof(query), 0) == -1){
 		printf("Error sending\n");
