@@ -17,6 +17,7 @@ HW3 programming assignment: HTTP1.0 client GET request
 
 #define MAXDATASIZE 512 // max number of bytes we can get at once 
 
+char cwd[MAXDATASIZE]; //path of current working directory
 
 // get sockaddr, IPv4 or IPv6:
 void *get_in_addr(struct sockaddr *sa)
@@ -31,21 +32,12 @@ void *get_in_addr(struct sockaddr *sa)
 
 int main(int argc, char const *argv[])
 {
-	/* write HTTP1.0 client code */
-	/* example of GET request for www.google.com
-
-	    char query[] =
-        "GET / HTTP/1.0\r\n"
-        "Host: www.google.com\r\n"
-        "\r\n";
-
-    */
-
 	int sockfd, numbytes;  
 	char buf[MAXDATASIZE];
 	struct addrinfo hints, *servinfo, *p;
 	int rv;
 	char s[INET6_ADDRSTRLEN];
+	FILE *fp;
 
 	if (argc != 4) {
 	fprintf(stderr,"usage: client <proxy address> <proxy port> <url to retrieve>\n");
@@ -103,6 +95,19 @@ int main(int argc, char const *argv[])
 
 	fd_set tmp;	
 
+	//Obtaining Current directory
+	if (getcwd(cwd, sizeof(cwd)) != NULL)
+	        printf("client: Current working directory: %s\n", cwd);
+        else
+	        perror("client: getcwd() error");
+
+	//Appending the filename to the path
+        sprintf(cwd,"%s/%s",cwd,argv[3]);
+        fp = fopen (cwd, "a");
+        if (fp == NULL) {
+		printf ("client: file not found (%s)\n", cwd);
+	}                                
+	                                               
 	while(1)
 	{
 	    FD_ZERO(&tmp);
@@ -122,7 +127,7 @@ int main(int argc, char const *argv[])
 		}
 
 		buf[numbytes] = '\0';
-
+		fwrite(buf,sizeof(char),strlen(buf),fp);
 		printf("\nclient: received %s",buf);
 	    }
 	}
