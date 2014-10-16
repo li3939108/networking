@@ -7,6 +7,7 @@
 #include <unistd.h>
 #include <errno.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -14,11 +15,26 @@
 #include <arpa/inet.h>
 #include <sys/wait.h>
 #include <signal.h>
+#include <time.h>
 
 #define BACKLOG 10     // how many pending connections queue will hold
 
 #define MAXDATASIZE 512
 #define HTTP "HTTP/1.0"
+
+char cwd[MAXDATASIZE]; //path of current working directory
+
+//Obtain last modified time of file for LRU
+
+void file_modified(char *path)
+{
+    struct stat attrib;
+    stat(path, &attrib);
+    char date[10];
+    strftime(date, 10, "%d-%m-%y", localtime(&(attrib.st_ctime)));
+    printf("The file %s was last modified at %s\n", path, date);
+    date[0] = 0;
+}
 
 // get sockaddr, IPv4 or IPv6:
 void *get_in_addr(struct sockaddr *sa)
@@ -38,6 +54,7 @@ int main(int argc, char *argv[])
     struct sockaddr_in host_addr;
     socklen_t sin_size;
     struct hostent *host;
+    FILE *fp;
     int yes=1, port;
     char s[INET6_ADDRSTRLEN];
     int rv,i,n,numbytes;
@@ -163,12 +180,20 @@ int main(int argc, char *argv[])
 					sscanf(buf,"%s %s %s\r\nHost: %s\r\n\r\n",http,path,prot,url);			
 					printf("server: %s %s %s %s\n",http,path,prot,url);
 					if(((strncmp(http,"GET",3)==0))&&(strncmp(prot,HTTP,8)==0)) {
-						
+												
 						port=80;
 						host=gethostbyname(url);
 						if(host==NULL)
 							goto badurl;
 					
+						//Obtaining Current directory
+						if (getcwd(cwd, sizeof(cwd)) == NULL) {
+	               			        	perror("client: getcwd() error\n");
+							continue;
+						}
+						//Appending the filename to the path
+						sprintf(cwd,"%s/%s%d",cwd,url,port);
+						                                                   
 						printf("server: HostPath = %s%s\tPort = %d\n",url,path,port);
 						   
 						bzero((char*)&host_addr,sizeof(host_addr));
@@ -188,17 +213,26 @@ int main(int argc, char *argv[])
 						else{
 							do
 							{
+								fp = fopen (cwd, "a+");
+								if (fp == NULL) {
+									printf ("client: file not found (%s)\n", cwd);
+								}
+
 								bzero((char*)buf,sizeof(buf));
 								n=recv(sock_req,buf,sizeof(buf),0);
+								fputs(buf,fp);
+								fclose(fp);
 								if(!(n<=0))
 									send(i,buf,n,0);
+
 							}while(n>0);
 						}
+						file_modified(cwd);
 					}
 					else
 					{
 						badurl:
-						send(i,"400 : BAD REQUEST ONLY HTTP REQUESTS ALLOWED",18,0);
+						send(i,"HTTP/1.0 400 : BAD REQUEST,ONLY HTTP REQUESTS ALLOWED",100,0);
 					}
 				}
 			}

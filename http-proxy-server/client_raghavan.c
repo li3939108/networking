@@ -35,8 +35,8 @@ int main(int argc, char const *argv[])
 	int sockfd, numbytes;  
 	char buf[MAXDATASIZE];
 	struct addrinfo hints, *servinfo, *p;
-	int rv;
-	char s[INET6_ADDRSTRLEN];
+	int rv,i;
+	char *tkn,*host,*header,s[INET6_ADDRSTRLEN],query[MAXDATASIZE]; 
 	FILE *fp;
 
 	if (argc != 4) {
@@ -81,10 +81,7 @@ int main(int argc, char const *argv[])
 	printf("client: connecting to %s\n", s);
 
 	freeaddrinfo(servinfo); // all done with this structure
-	// FD_SET tmp variable for select() 
-	char query[MAXDATASIZE]; 
-	char *tkn,*host;
-	int i=0;
+	
 	while(i<strlen(argv[3])) {
 		if(argv[3][i]==':') 
 			break;
@@ -107,48 +104,47 @@ int main(int argc, char const *argv[])
 		perror("send");
     	}
 
-	fd_set tmp;	
-
 	//Obtaining Current directory
-	if (getcwd(cwd, sizeof(cwd)) != NULL)
-	        printf("client: Current working directory: %s\n", cwd);
-        else
+	if (getcwd(cwd, sizeof(cwd)) == NULL) {
 	        perror("client: getcwd() error");
+		exit(1);
+	}
 
 	//Appending the filename to the path
         sprintf(cwd,"%s/%s",cwd,host);                           
 	                                               
-	while(1)
-	{
-	    FD_ZERO(&tmp);
-	    FD_SET(sockfd,&tmp);
+	i=0;
+	do {
+		if ((numbytes = recv(sockfd, buf,sizeof(buf), 0)) == -1) {
+                        perror("recv");
+                        exit(1);
+                }
+	
+		buf[numbytes] = '\0';
+		if(!i) { 
+			char temp[MAXDATASIZE];
+			strcpy(temp,buf);
+			header=strtok(temp," ");
+			header=strtok(NULL,"<");
+			if(strncmp(header,"200",3) != 0) {
+				printf("\nclient: %s\n\nPlease try again...\n\n",header);
+				break;
+			}
+			printf("\nclient: %s\nCheck %s for the document\n",header,cwd);
+			i=1;
+		}
 
-	    if(select(sockfd+1,&tmp,NULL,NULL,NULL) == -1) {
-		printf("Error with select \n");
-		perror("select");
-		exit(1);
-	    }
-	    	    
-	    if(FD_ISSET(sockfd,&tmp))
-	    {
 		fp = fopen (cwd, "a+");
 		if (fp == NULL) {
 			printf ("client: file not found (%s)\n", cwd);
 		}     
-		if ((numbytes = recv(sockfd, buf,sizeof(buf), 0)) == -1) {
-			perror("recv");
-			exit(1);
-		}
-
-		buf[numbytes] = '\0';
-		fputs((const char *)buf,fp);
+		
+		fputs(buf,fp);
 		fclose(fp);
-		printf("\nclient: received %s",buf);
-	    }
-	}
+
+	} while(numbytes > 0);
 	
 	close(sockfd);
-
 
 	return 0;
 }
