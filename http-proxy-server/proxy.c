@@ -24,8 +24,16 @@
 
 char cwd[MAXDATASIZE]; //path of current working directory
 
-//Obtain last modified time of file for LRU
+//Search and replace a character in a string
+void replace_char (char *s, char find, char replace) {
+    while (*s != 0) {
+    	if (*s == find)
+		*s = replace;
+	s++;
+    }
+}
 
+//Obtain last modified time of file for LRU
 void file_modified(char *path)
 {
     struct stat attrib;
@@ -58,7 +66,7 @@ int main(int argc, char *argv[])
     int yes=1, port;
     char s[INET6_ADDRSTRLEN];
     int rv,i,n,numbytes;
-    char buf[MAXDATASIZE], url[MAXDATASIZE], prot[10], http[MAXDATASIZE],path[MAXDATASIZE];
+    char cache[MAXDATASIZE], buf[MAXDATASIZE], url[MAXDATASIZE], tmp[MAXDATASIZE], prot[10], http[MAXDATASIZE],path[MAXDATASIZE];
 
     //Checking specification of command line options
     if (argc != 3) {
@@ -126,6 +134,15 @@ int main(int argc, char *argv[])
 
     printf("server: waiting for connections...\n");
 
+    //Obtaining Current directory
+    if (getcwd(cwd, sizeof(cwd)) == NULL) {
+    	perror("client: getcwd() error\n");
+	exit(1);
+    }
+    
+    sprintf(cache,"%s/proxy_cache");
+    mkdir(cache,"w+");
+
     while(1) 
     {  // main accept() loop
 	read_fds = master;
@@ -182,17 +199,31 @@ int main(int argc, char *argv[])
 					if(((strncmp(http,"GET",3)==0))&&(strncmp(prot,HTTP,8)==0)) {
 												
 						port=80;
-						host=gethostbyname(url);
-						if(host==NULL)
-							goto badurl;
 					
 						//Obtaining Current directory
 						if (getcwd(cwd, sizeof(cwd)) == NULL) {
 	               			        	perror("client: getcwd() error\n");
 							continue;
 						}
-						//Appending the filename to the path
-						sprintf(cwd,"%s/%s%d",cwd,url,port);
+						
+						strcpy(tmp,url);
+						replace_char(strcat(tmp,path),'/','_');
+						sprintf(cache,"%s/%s",cwd,tmp);
+						//Checking the cache in the directory
+						if((fp=fopen(cache,"r")) != NULL) {
+							printf("server: Obtained from proxy cache \n");
+							while(!feof(fp)) {
+								n = fread(buf, sizeof(char), sizeof(buf), fp);
+								if(!(n<=0))
+									send(i,buf,n,0);
+							}
+							fclose(fp);
+							continue;
+						}
+
+						host=gethostbyname(url);
+                                                if(host==NULL)
+                                                        goto badurl;
 						                                                   
 						printf("server: HostPath = %s%s\tPort = %d\n",url,path,port);
 						   
@@ -206,7 +237,11 @@ int main(int argc, char *argv[])
 						printf("server: Connected to %s IP - %s\n\n",url,inet_ntoa(host_addr.sin_addr));
 						if(new_fd<0)
 							perror("server: Error in connecting to remote server");
-						   
+						
+						//Appending the filename to the path
+                                                replace_char(strcat(url,path),'/','_');
+                                                sprintf(cwd,"%s/%s",cwd,url);
+
 						n=send(sock_req,buf,strlen(buf),0);
 						if(n<0)
 							perror("Error writing to socket");

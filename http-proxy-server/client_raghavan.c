@@ -19,6 +19,17 @@ HW3 programming assignment: HTTP1.0 client GET request
 
 char cwd[MAXDATASIZE]; //path of current working directory
 
+
+//Search and replace a character in a string
+void replace_char (char *s, char find, char replace) {
+    while (*s != 0) {
+	if (*s == find)
+		*s = replace;
+        s++;
+    }
+}
+
+                      
 // get sockaddr, IPv4 or IPv6:
 void *get_in_addr(struct sockaddr *sa)
 {
@@ -111,6 +122,7 @@ int main(int argc, char const *argv[])
 	}
 
 	//Appending the filename to the path
+	replace_char(strcat(host,tkn),'/','_');
         sprintf(cwd,"%s/%s",cwd,host);                           
 	                                               
 	i=0;
