@@ -17,12 +17,14 @@
 #include <signal.h>
 #include <time.h>
 
-#define BACKLOG 10     // how many pending connections queue will hold
+#define BACKLOG 10     	// how many pending connections queue will hold
+#define CACHE_SIZE 10	// Number of pages to be stored in the cache 
 
 #define MAXDATASIZE 512
 #define HTTP "HTTP/1.0"
 
 char cwd[MAXDATASIZE]; //path of current working directory
+
 
 //Search and replace a character in a string
 void replace_char (char *s, char find, char replace) {
@@ -33,15 +35,44 @@ void replace_char (char *s, char find, char replace) {
     }
 }
 
-//Obtain last modified time of file for LRU
-void file_modified(char *path)
-{
-    struct stat attrib;
-    stat(path, &attrib);
-    char tm[50];
-    strftime(tm, 50, "%d/%m/%Y %H:%M:%S", localtime(&(attrib.st_mtime)));
-    printf("The file %s was last modified at %s\n", path, tm);
-    tm[0] = 0;
+// Checking and replacing in cache 
+int check_cache(char *proxy[], char *entry) {
+    int i,j;
+    for(i=0; i<CACHE_SIZE; i++) {
+	if(proxy[i] != NULL) {
+		//Finding in the list, and replacing in LRU fashion if found
+		if(!strcmp(proxy[i],entry)) {
+			for(j=0; j<i; j++) {
+				strcpy(proxy[j+1],proxy[j]);
+			}
+			strcpy(proxy[0],entry);
+			return 1;
+		}
+	}
+    }
+    return 0;
+}
+
+void add_entry(char *proxy[], char *entry) {
+    int i,j;
+    for(i=0; i<CACHE_SIZE; i++) {
+	if(proxy[i] == NULL) {
+		proxy[i]=(char*) malloc(MAXDATASIZE);
+		//Adding at the front
+		for(j=0; j<i; j++) {
+        		strcpy(proxy[j+1],proxy[j]);
+        	}	
+		strcpy(proxy[0],entry);
+		return;
+	}
+    }
+    
+    // Cache full, so discarding the LRU entry 
+    for(j=0; j<CACHE_SIZE-1; j++) {
+	strcpy(proxy[j+1],proxy[j]);
+    }
+    strcpy(proxy[0],entry);
+    return;
 }
 
 // get sockaddr, IPv4 or IPv6:
@@ -66,8 +97,12 @@ int main(int argc, char *argv[])
     int yes=1, port;
     char s[INET6_ADDRSTRLEN];
     int rv,i,n,numbytes;
-    char cache[MAXDATASIZE], buf[MAXDATASIZE], url[MAXDATASIZE], tmp[MAXDATASIZE], prot[10], http[MAXDATASIZE],path[MAXDATASIZE];
+    char buf[MAXDATASIZE], url[MAXDATASIZE], tmp[MAXDATASIZE], prot[10], http[MAXDATASIZE],path[MAXDATASIZE];
+    char *proxy_cache[CACHE_SIZE]; // Store entries in LRU fashion
 
+    for(i=0; i<CACHE_SIZE; i++) {
+	proxy_cache[i]=NULL;
+    }
     //Checking specification of command line options
     if (argc != 3) {
         fprintf(stderr,"usage: server server_ip server_port \n");
@@ -134,15 +169,6 @@ int main(int argc, char *argv[])
 
     printf("server: waiting for connections...\n");
 
-    //Obtaining Current directory
-    if (getcwd(cwd, sizeof(cwd)) == NULL) {
-    	perror("client: getcwd() error\n");
-	exit(1);
-    }
-    
-    sprintf(cache,"%s/proxy_cache");
-    mkdir(cache,"w+");
-
     while(1) 
     {  // main accept() loop
 	read_fds = master;
@@ -208,10 +234,12 @@ int main(int argc, char *argv[])
 						
 						strcpy(tmp,url);
 						replace_char(strcat(tmp,path),'/','_');
-						sprintf(cache,"%s/%s",cwd,tmp);
+						
 						//Checking the cache in the directory
-						if((fp=fopen(cache,"r")) != NULL) {
-							printf("server: Obtained from proxy cache \n");
+						if(check_cache(proxy_cache,tmp)) {
+							sprintf(cwd,"%s/%s",cwd,tmp);
+							fp=fopen(cwd,"r");
+							printf("server: Obtained from proxy cache \n\n");
 							while(!feof(fp)) {
 								n = fread(buf, sizeof(char), sizeof(buf), fp);
 								if(!(n<=0))
@@ -262,7 +290,7 @@ int main(int argc, char *argv[])
 
 							}while(n>0);
 						}
-						file_modified(cwd);
+						add_entry(proxy_cache,url);
 					}
 					else
 					{

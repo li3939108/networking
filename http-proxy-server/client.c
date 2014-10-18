@@ -17,7 +17,19 @@ HW3 programming assignment: HTTP1.0 client GET request
 
 #define MAXDATASIZE 512 // max number of bytes we can get at once 
 
+char cwd[MAXDATASIZE]; //path of current working directory
 
+
+//Search and replace a character in a string
+void replace_char (char *s, char find, char replace) {
+    while (*s != 0) {
+	if (*s == find)
+		*s = replace;
+        s++;
+    }
+}
+
+                      
 // get sockaddr, IPv4 or IPv6:
 void *get_in_addr(struct sockaddr *sa)
 {
@@ -31,21 +43,12 @@ void *get_in_addr(struct sockaddr *sa)
 
 int main(int argc, char const *argv[])
 {
-	/* write HTTP1.0 client code */
-	/* example of GET request for www.google.com
-
-	    char query[] =
-        "GET / HTTP/1.0\r\n"
-        "Host: www.google.com\r\n"
-        "\r\n";
-
-    */
-
 	int sockfd, numbytes;  
 	char buf[MAXDATASIZE];
 	struct addrinfo hints, *servinfo, *p;
-	int rv;
-	char s[INET6_ADDRSTRLEN];
+	int rv,i;
+	char *tkn,*host,*header,s[INET6_ADDRSTRLEN],query[MAXDATASIZE]; 
+	FILE *fp;
 
 	if (argc != 4) {
 	fprintf(stderr,"usage: client <proxy address> <proxy port> <url to retrieve>\n");
@@ -89,47 +92,71 @@ int main(int argc, char const *argv[])
 	printf("client: connecting to %s\n", s);
 
 	freeaddrinfo(servinfo); // all done with this structure
-	// FD_SET tmp variable for select() 
-	fd_set tmp;
+	
+	while(i<strlen(argv[3])) {
+		if(argv[3][i]==':') 
+			break;
+		i++;
+	}		
 
-	while(1)
-	{
-	    FD_ZERO(&tmp);
-	    FD_SET(0,&tmp);
-	    FD_SET(sockfd,&tmp);
+	if(i==strlen(argv[3])) 
+		host=strtok((char*)argv[3],"/");
+	else {
+		host=strtok((char*)argv[3],"/");		
+		host=strtok(NULL,"/");
+	}			
 
-	    if(select(sockfd+1,&tmp,NULL,NULL,NULL) == -1) {
-		printf("Error with select \n");
-		perror("select");
-		exit(1);
-	    }
-	    
-	    if(FD_ISSET(0,&tmp))
-	    {
-		char query[MAXDATASIZE] = { }; /* = "GET / HTTP/1.0\r\n" "Host: www.google.com\r\n" "\r\n"*/
-		printf("client: sending ... ");
-		sprintf(query, "GET / HTTP/1.0\r\nHost: %s\r\n\r\n",argv[3]);		
-		if (send(sockfd, query, sizeof(query), 0) == -1){
+	tkn=strtok(NULL,"\n");
+	tkn=(tkn==NULL)?"":tkn;
+	sprintf(query, "GET /%s HTTP/1.0\r\nHost: %s\r\n\r\n",tkn,host);
+	printf("client: %s\n", query);		
+	if (send(sockfd, query, sizeof(query), 0) == -1){
 		printf("Error sending\n");
 		perror("send");
-	    	}
-	    }
-	    
-	    if(FD_ISSET(sockfd,&tmp))
-	    {
+    	}
+
+	//Obtaining Current directory
+	if (getcwd(cwd, sizeof(cwd)) == NULL) {
+	        perror("client: getcwd() error");
+		exit(1);
+	}
+
+	//Appending the filename to the path
+	replace_char(strcat(host,tkn),'/','_');
+        sprintf(cwd,"%s/%s",cwd,host);                           
+	                                               
+	i=0;
+	do {
 		if ((numbytes = recv(sockfd, buf,sizeof(buf), 0)) == -1) {
-		    perror("recv");
-	     	       exit(1);
+                        perror("recv");
+                        exit(1);
+                }
+	
+		buf[numbytes] = '\0';
+		if(!i) { 
+			char temp[MAXDATASIZE];
+			strcpy(temp,buf);
+			header=strtok(temp," ");
+			header=strtok(NULL,"<");
+			if(strncmp(header,"200",3) != 0) {
+				printf("\nclient: %s\n\nPlease try again...\n\n",header);
+				break;
+			}
+			printf("\nclient: %s\nDocument at : %s \n",header,cwd);
+			i=1;
 		}
 
-		buf[numbytes] = '\0';
+		fp = fopen (cwd, "a+");
+		if (fp == NULL) {
+			printf ("client: file not found (%s)\n", cwd);
+		}     
+		
+		fputs(buf,fp);
+		fclose(fp);
 
-		printf("client: received '%s'\n",buf);
-	    }
-	}
+	} while(numbytes > 0);
 	
 	close(sockfd);
-
 
 	return 0;
 }
