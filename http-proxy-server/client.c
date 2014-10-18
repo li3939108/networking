@@ -1,6 +1,5 @@
 /* 
-ECEN602: Computer Networks
-HW3 programming assignment: HTTP1.0 client GET request
+HTTP1.0 client GET request
 */
 
 #include <stdio.h>
