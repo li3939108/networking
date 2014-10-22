@@ -15,7 +15,7 @@ HTTP1.0 client GET request
 
 #include <arpa/inet.h>
 
-#define MAXDATASIZE 512 // max number of bytes we can get at once 
+#define MAXDATASIZE 1024 // max number of bytes we can get at once 
 
 char cwd[MAXDATASIZE]; //path of current working directory
 
@@ -135,14 +135,19 @@ int main(int argc, char const *argv[])
 		buf[numbytes] = '\0';
 		if(!i) { 
 			char temp[MAXDATASIZE];
-			strcpy(temp,buf);
-			header=strtok(temp," ");
-			header=strtok(NULL,"<");
-			if(strncmp(header,"200",3) != 0) {
-				printf("\nclient: %s\n\nPlease try again...\n\n",header);
+			header=strstr(buf,"\r\n\r\n");
+			if(header)
+				header += 4;
+			else
+				continue;
+			strncpy(temp,buf,header-buf);
+			
+			if(strncmp(buf+9,"200",3) != 0) {
+				printf("\nclient:\n%s\n\nPlease try again...\n\n",temp);
 				break;
 			}
-			printf("\nclient: %s\nDocument at : %s \n",header,cwd);
+			printf("\nclient:\n%s\n\nDocument at : %s \n",temp,cwd);
+			strcpy(buf,header);
 			i=1;
 		}
 

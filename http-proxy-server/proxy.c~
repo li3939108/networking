@@ -58,6 +58,8 @@ int check_cache(char *proxy[], char *entry, char *cwd, int sock) {
                                         send(sock,buf,n,0);
                         }
                         fclose(fp);
+                        close(sock); // bye!
+                        FD_CLR(sock, &master); // remove from master set
 			
 			for(j=0; j<i; j++) {
 				strcpy(proxy[j+1],proxy[j]);
@@ -265,9 +267,9 @@ int main(int argc, char *argv[])
 								if(!(n<=0))
 									send(i,buf,n,0);
 							}
-							fclose(fp);*/
+							fclose(fp);
 							close(i); // bye!
-		                                        FD_CLR(i, &master); // remove from master set
+		                                        FD_CLR(i, &master); // remove from master set*/
 							continue;
 						}
 
