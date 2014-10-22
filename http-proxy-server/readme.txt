@@ -4,6 +4,8 @@ ECEN602 HW3 Programming Assignment
 Team Number: 30
 Member 1 # 
 Member 2 # 
+Member 3 # 
+
 ---------------------------------------
 
 Description/Comments:
