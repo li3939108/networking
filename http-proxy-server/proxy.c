@@ -25,7 +25,6 @@
 
 char cwd[MAXDATASIZE]; //path of current working directory
 
-
 //Search and replace a character in a string
 void replace_char (char *s, char find, char replace) {
     while (*s != 0) {
