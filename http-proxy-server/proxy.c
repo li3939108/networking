@@ -140,7 +140,7 @@ int check_cache(char *proxy[], char *entry, int sock, struct addrinfo *servinfo)
 				}
 				close(sock_req);
 				//Checking if modified after expiry
-				if(difftime(timegm(&exp),timegm(&up))>0)
+				if(difftime(timegm(&exp),timegm(&up))>0 && temp!=NULL && upd!=NULL) 
 					goto send_cache;
 				
 				// Expired and modified after that, so re-obtain from server
