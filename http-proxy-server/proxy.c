@@ -23,6 +23,44 @@
 #define MAXDATASIZE 1024
 #define HTTP "HTTP/1.0"
 
+// Getting Month
+int getMonth(const char *strMonth) {
+    int i;
+    static char *months[] = { 
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
+    for (i = 0; i < 12; ++i) {
+        if (!strncmp(strMonth, months[i], 3)) return i;
+    }
+    return -1;
+}
+ 
+
+// Getting Day of week
+int getDay(const char *strDay) {
+    int i;
+    static char *days[] = { 
+        "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
+    for (i = 0; i < 7; ++i) {
+        if (!strncmp(strDay, days[i], 3)) return i;
+    }
+    return -1;
+}
+
+// Convert to tm
+struct tm strToTm(const char *strDate) {
+    struct tm tmDate = { 0 };
+    int year = 0;
+    char strMonth[4]={0},strDay[4] = { 0 };
+ 
+    sscanf(strDate, "%3s, %d %3s %d %d:%d:%d %*s", strDay, &(tmDate.tm_mday), 
+        strMonth, &year, &(tmDate.tm_hour), &(tmDate.tm_min), &(tmDate.tm_sec));
+    tmDate.tm_wday = getDay(strDay);
+    tmDate.tm_mon = getMonth(strMonth);
+    tmDate.tm_year = year - 1900;
+    tmDate.tm_isdst = -1;
+    return tmDate;
+}
+ 
 char cwd[MAXDATASIZE]; //path of current working directory
 
 //Search and replace a character in a string
@@ -37,33 +75,53 @@ void replace_char (char *s, char find, char replace) {
 // Checking and replacing in cache 
 int check_cache(char *proxy[], char *entry, char *cwd, int sock) {
     int i,j,n;
-    char *temp,exp[50],buf[MAXDATASIZE];
+    char *temp,buf[MAXDATASIZE];
     char *e = "Expires: ";
-    
+    struct tm exp,*now_gm;
+    time_t now;
     FILE *fp;
     for(i=0; i<CACHE_SIZE; i++) {
 	if(proxy[i] != NULL) {
+		printf("server: %s\n",proxy[i]);
 		//Finding in the list, and replacing in LRU fashion if found
 		if(!strcmp(proxy[i],entry)) {
 			sprintf(cwd,"%s/%s",cwd,entry);
                         fp=fopen(cwd,"r");
-                        //printf("server: Obtained from proxy cache \n\n");
 			n = fread(buf, sizeof(char), sizeof(buf), fp);
 			if((temp = strstr(buf,e)) != NULL) {
-				//CHECK if expired  ///sscanf(exp,"Wed, 19 Nov 2014 15:39:40 GMT",temp+strlen(e));
+				exp=strToTm(temp+strlen(e));
+				printf("server: Expires: %s", asctime(&exp));
+				now = time(NULL);				
+				now_gm = gmtime(&now);
+				printf("server: Current: %s", asctime(now_gm));
 			}
-                        while(!feof(fp)) {
-                                n = fread(buf, sizeof(char), sizeof(buf), fp);
-                                if(!(n<=0))
-                                        send(sock,buf,n,0);
-                        }
-                        fclose(fp);
-			
-			for(j=0; j<i; j++) {
-				strcpy(proxy[j+1],proxy[j]);
+			if(difftime(timegm(&exp),now)>0 && (temp != NULL)) {
+				rewind(fp);
+		                while(!feof(fp)) {
+		                        n = fread(buf, sizeof(char), sizeof(buf), fp);
+		                        if(!(n<=0))
+		                                send(sock,buf,n,0);
+		                }
+		                fclose(fp);
+				for(j=i; j>0; j--) {
+					strcpy(proxy[j],proxy[j-1]);
+				}	
+				strcpy(proxy[0],entry);
+				printf("server: Obtained from proxy cache \n\n");
+				return 1;
 			}
-			strcpy(proxy[0],entry);
-			return 1;
+			else {
+				remove(cwd);
+				fclose(fp);
+				for(j=i; j<CACHE_SIZE-1; j++) {
+					if(proxy[j+1] != NULL) 
+						strcpy(proxy[j],proxy[j+1]);
+					else
+						break;
+				}
+				proxy[j]=NULL;
+				return 0;
+			}
 		}
 	}
     }
@@ -76,8 +134,8 @@ void add_entry(char *proxy[], char *entry) {
 	if(proxy[i] == NULL) {
 		proxy[i]=(char*) malloc(MAXDATASIZE);
 		//Adding at the front
-		for(j=0; j<i; j++) {
-        		strcpy(proxy[j+1],proxy[j]);
+		for(j=i; j>0; j--) {
+        		strcpy(proxy[j],proxy[j-1]);
         	}	
 		strcpy(proxy[0],entry);
 		return;
@@ -241,8 +299,6 @@ int main(int argc, char *argv[])
 							
 											
 						if ((getaddrinfo(url, "http", &hints, &servinfo)) != 0) {	
-							//send(i,"HTTP/1.0 400 : BAD REQUEST,ONLY HTTP REQUESTS ALLOWED",100,0);						     
-							//continue;
 							goto badurl;
 						}					
 		
@@ -257,15 +313,6 @@ int main(int argc, char *argv[])
 						
 						//Checking the cache in the directory
 						if(check_cache(proxy_cache,tmp,cwd,i)) {
-							/*sprintf(cwd,"%s/%s",cwd,tmp);
-							fp=fopen(cwd,"r");
-							printf("server: Obtained from proxy cache \n\n");
-							while(!feof(fp)) {
-								n = fread(buf, sizeof(char), sizeof(buf), fp);
-								if(!(n<=0))
-									send(i,buf,n,0);
-							}
-							fclose(fp);*/
 							close(i); // bye!
 		                                        FD_CLR(i, &master); // remove from master set
 							continue;
@@ -282,6 +329,11 @@ int main(int argc, char *argv[])
 						
 						//Appending the filename to the path
                                                 replace_char(strcat(url,path),'/','_');
+						//Obtaining Current directory
+						if (getcwd(cwd, sizeof(cwd)) == NULL) {
+	               			        	perror("client: getcwd() error\n");
+							continue;
+						}
                                                 sprintf(cwd,"%s/%s",cwd,url);
 
 						n=send(sock_req,buf,strlen(buf),0);

@@ -126,6 +126,8 @@ int main(int argc, char const *argv[])
         sprintf(cwd,"%s/%s",cwd,host);                           
 	                                               
 	i=0;
+	if((fp = fopen (cwd, "r")) != NULL)
+		remove(cwd);
 	do {
 		if ((numbytes = recv(sockfd, buf,sizeof(buf), 0)) == -1) {
                         perror("recv");
