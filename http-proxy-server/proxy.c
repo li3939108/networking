@@ -1,5 +1,5 @@
 /*
-** server.c -- a stream socket server demo
+** proxy server.c -- a stream socket server demo
 */
 
 #include <stdio.h>
@@ -34,7 +34,6 @@ int getMonth(const char *strMonth) {
     return -1;
 }
  
-
 // Getting Day of week
 int getDay(const char *strDay) {
     int i;
@@ -50,7 +49,7 @@ int getDay(const char *strDay) {
 struct tm strToTm(const char *strDate) {
     struct tm tmDate = { 0 };
     int year = 0;
-    char strMonth[4]={0},strDay[4] = { 0 };
+    char strMonth[4] = {0},strDay[4] = { 0 };
  
     sscanf(strDate, "%3s, %d %3s %d %d:%d:%d %*s", strDay, &(tmDate.tm_mday), 
         strMonth, &year, &(tmDate.tm_hour), &(tmDate.tm_min), &(tmDate.tm_sec));
@@ -73,21 +72,27 @@ void replace_char (char *s, char find, char replace) {
 }
 
 // Checking and replacing in cache 
-int check_cache(char *proxy[], char *entry, char *cwd, int sock) {
-    int i,j,n;
-    char *temp,buf[MAXDATASIZE];
+int check_cache(char *proxy[], char *entry, int sock, struct addrinfo *servinfo) {
+    int i,j,n,sock_req;
+    char *temp,*upd,*host,*path,buf[MAXDATASIZE],hbuf[MAXDATASIZE];
     char *e = "Expires: ";
-    struct tm exp,*now_gm;
+    char *l = "Last-Modified: ";
+    //Obtaining Current directory
+    if (getcwd(cwd, sizeof(cwd)) == NULL) {
+	perror("server: getcwd() error\n");
+	return 0;
+    }
+    struct tm exp, up, *now_gm;
     time_t now;
     FILE *fp;
     for(i=0; i<CACHE_SIZE; i++) {
 	if(proxy[i] != NULL) {
-		printf("server: %s\n",proxy[i]);
 		//Finding in the list, and replacing in LRU fashion if found
 		if(!strcmp(proxy[i],entry)) {
 			sprintf(cwd,"%s/%s",cwd,entry);
                         fp=fopen(cwd,"r");
 			n = fread(buf, sizeof(char), sizeof(buf), fp);
+			// Checking Expires time
 			if((temp = strstr(buf,e)) != NULL) {
 				exp=strToTm(temp+strlen(e));
 				printf("server: Expires: %s", asctime(&exp));
@@ -95,22 +100,50 @@ int check_cache(char *proxy[], char *entry, char *cwd, int sock) {
 				now_gm = gmtime(&now);
 				printf("server: Current: %s", asctime(now_gm));
 			}
+			// If not expired, then send from proxy cache
 			if(difftime(timegm(&exp),now)>0 && (temp != NULL)) {
-				rewind(fp);
-		                while(!feof(fp)) {
-		                        n = fread(buf, sizeof(char), sizeof(buf), fp);
-		                        if(!(n<=0))
-		                                send(sock,buf,n,0);
-		                }
-		                fclose(fp);
-				for(j=i; j>0; j--) {
-					strcpy(proxy[j],proxy[j-1]);
-				}	
-				strcpy(proxy[0],entry);
-				printf("server: Obtained from proxy cache \n\n");
-				return 1;
+				send_cache:
+					rewind(fp);
+				        while(!feof(fp)) {
+				                n = fread(buf, sizeof(char), sizeof(buf), fp);
+				                if(!(n<=0))
+				                        send(sock,buf,n,0);
+				        }
+				        fclose(fp);
+					for(j=i; j>0; j--) {
+						strcpy(proxy[j],proxy[j-1]);
+					}	
+					strcpy(proxy[0],entry);
+					printf("server: Obtained from proxy cache \n\n");
+					return 1;
 			}
+			// If expired in proxy cache, check if modified
 			else {
+				// Checking Last Updated time
+				strcpy(hbuf,entry);
+				replace_char(hbuf,'_','/');
+				host = strtok((char*)hbuf,"/");
+				path = strtok(NULL,"\n");
+				// implementing a HEAD request
+				sprintf(buf,"HEAD /%s HTTP/1.0\r\nHost: %s\r\n\r\n",path,host);
+				sock_req = socket(servinfo->ai_family, servinfo->ai_socktype, servinfo->ai_protocol);
+				connect(sock_req, servinfo->ai_addr, servinfo->ai_addrlen);
+				
+				n = send(sock_req,buf,sizeof(buf),0);
+				if(n<0)
+					perror("server: Error sending to the socket\n");
+				
+				n=recv(sock_req,buf,sizeof(buf),0);
+				if((upd = strstr(buf,l)) != NULL) {
+					up=strToTm(upd+strlen(l));
+					printf("server: Last-Modified: %s", asctime(&up));
+				}
+				close(sock_req);
+				//Checking if modified after expiry
+				if(difftime(timegm(&exp),timegm(&up))>0)
+					goto send_cache;
+				
+				// Expired and modified after that, so re-obtain from server
 				remove(cwd);
 				fclose(fp);
 				for(j=i; j<CACHE_SIZE-1; j++) {
@@ -302,38 +335,34 @@ int main(int argc, char *argv[])
 							goto badurl;
 						}					
 		
-						//Obtaining Current directory
-						if (getcwd(cwd, sizeof(cwd)) == NULL) {
-	               			        	perror("client: getcwd() error\n");
-							continue;
-						}
-						
-						strcpy(tmp,url);
-						replace_char(strcat(tmp,path),'/','_');
-						
-						//Checking the cache in the directory
-						if(check_cache(proxy_cache,tmp,cwd,i)) {
-							close(i); // bye!
-		                                        FD_CLR(i, &master); // remove from master set
-							continue;
-						}
-
 						printf("server: HostPath = %s%s\n",url,path);
 						   
 						sock_req = socket(servinfo->ai_family, servinfo->ai_socktype, servinfo->ai_protocol);
 						new_fd=connect(sock_req, servinfo->ai_addr, servinfo->ai_addrlen);
 						inet_ntop(servinfo->ai_family, get_in_addr(servinfo->ai_addr), s, sizeof s);
-						printf("server: Connected to %s IP - %s\n\n",url,s);
+						printf("server: Connected to %s IP - %s\n",url,s);
 						if(new_fd<0)
 							perror("server: Error in connecting to remote server");
+											
+						strcpy(tmp,url);
+						replace_char(strcat(tmp,path),'/','_');
 						
-						//Appending the filename to the path
-                                                replace_char(strcat(url,path),'/','_');
-						//Obtaining Current directory
-						if (getcwd(cwd, sizeof(cwd)) == NULL) {
-	               			        	perror("client: getcwd() error\n");
+						//Checking the cache in the directory
+						if(check_cache(proxy_cache,tmp,i,servinfo)) {
+							close(i); // bye!
+		                                        FD_CLR(i, &master); // remove from master set
 							continue;
 						}
+
+						//Obtaining Current directory
+						if (getcwd(cwd, sizeof(cwd)) == NULL) {
+	               			        	perror("server: getcwd() error\n");
+							continue;
+						}
+
+						//Appending the filename to the path
+                                                replace_char(strcat(url,path),'/','_');
+						
                                                 sprintf(cwd,"%s/%s",cwd,url);
 
 						n=send(sock_req,buf,strlen(buf),0);
@@ -344,7 +373,7 @@ int main(int argc, char *argv[])
 							{
 								fp = fopen (cwd, "a+");
 								if (fp == NULL) {
-									printf ("client: file not found (%s)\n", cwd);
+									printf ("server: file not found (%s)\n", cwd);
 								}
 
 								bzero((char*)buf,sizeof(buf));
@@ -357,6 +386,7 @@ int main(int argc, char *argv[])
 							}while(n>0);
 						}
 						add_entry(proxy_cache,url);
+						printf("\n");
 					}
 					else
 					{
