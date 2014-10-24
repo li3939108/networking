@@ -378,7 +378,7 @@ int main(int argc, char *argv[])
 
 								bzero((char*)buf,sizeof(buf));
 								n=recv(sock_req,buf,sizeof(buf),0);
-								fputs(buf,fp);
+								fwrite(buf, n, sizeof(char), fp);
 								fclose(fp);
 								if(!(n<=0))
 									send(i,buf,n,0);

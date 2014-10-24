@@ -149,7 +149,8 @@ int main(int argc, char const *argv[])
 				break;
 			}
 			printf("\nclient:\n%s\n\nDocument at : %s \n",temp,cwd);
-			strcpy(buf,header);
+			numbytes -= header-buf;
+			memmove(&buf,header,numbytes);
 			i=1;
 		}
 
@@ -158,7 +159,7 @@ int main(int argc, char const *argv[])
 			printf ("client: file not found (%s)\n", cwd);
 		}     
 		
-		fputs(buf,fp);
+		fwrite(buf, numbytes, sizeof(char), fp);
 		fclose(fp);
 
 	} while(numbytes > 0);
