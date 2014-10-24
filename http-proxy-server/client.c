@@ -18,18 +18,7 @@ HTTP1.0 client GET request
 #define MAXDATASIZE 1024 // max number of bytes we can get at once 
 
 char cwd[MAXDATASIZE]; //path of current working directory
-
-
-//Search and replace a character in a string
-void replace_char (char *s, char find, char replace) {
-    while (*s != 0) {
-	if (*s == find)
-		*s = replace;
-        s++;
-    }
-}
-
-                      
+                   
 // get sockaddr, IPv4 or IPv6:
 void *get_in_addr(struct sockaddr *sa)
 {
@@ -47,7 +36,7 @@ int main(int argc, char const *argv[])
 	char buf[MAXDATASIZE];
 	struct addrinfo hints, *servinfo, *p;
 	int rv,i;
-	char *tkn,*host,*header,s[INET6_ADDRSTRLEN],query[MAXDATASIZE]; 
+	char *tkn,*host,*header,*fname,s[INET6_ADDRSTRLEN],query[MAXDATASIZE]; 
 	FILE *fp;
 
 	if (argc != 4) {
@@ -120,10 +109,21 @@ int main(int argc, char const *argv[])
 	        perror("client: getcwd() error");
 		exit(1);
 	}
-
-	//Appending the filename to the path
-	replace_char(strcat(host,tkn),'/','_');
-        sprintf(cwd,"%s/%s",cwd,host);                           
+	
+	// Getting file name
+	if((!strcmp(tkn,"")) || (!strlen(tkn)))
+		fname=host;
+	else {
+		char *tem=tkn;
+		header=strtok(tem,"/\n");
+		while(header!=NULL) {
+			fname=header;
+			header=strtok(NULL,"/\n");
+		}
+	}
+		
+	//Appending the filename to the path and storing in the directory
+        sprintf(cwd,"%s/%s",cwd,fname);                           
 	                                               
 	i=0;
 	if((fp = fopen (cwd, "r")) != NULL)
