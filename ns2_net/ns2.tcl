@@ -5,18 +5,27 @@
 
 set ns [new Simulator]
 
-
 set f0 [open src1_[lindex $argv 0]_[lindex $argv 1].tr w]
 set f1 [open src2_[lindex $argv 0]_[lindex $argv 1].tr w]
 
 set nf [open out.nam w]
 $ns namtrace-all $nf
 
+set sum_1 0
+set sum_2 0
+set count 0
+#set throughput_avg [0]
+
 proc finish {} {
-	global f0 f1 nf
+	global f0 f1 argv sum_1 sum_2 count
 	close $f0
 	close $f1
-	exec nam out.nam &
+	puts "Average throughput (src1) = [expr $sum_1/$count] MBits/s "
+	puts "Average throughput (src2) = [expr $sum_2/$count] MBits/s "
+	puts "Ratio of Average throughput (src1/src2) = [expr $sum_1/$sum_2] MBits/s \n"
+	#exec nam out.nam &
+	#Call xgraph to display the results
+        exec xgraph src1_[lindex $argv 0]_[lindex $argv 1].tr src2_[lindex $argv 0]_[lindex $argv 1].tr -geometry 800x400 &
 	exit 0
 }
 
@@ -67,7 +76,7 @@ $ns connect $tcp0 $sink0
 $ns connect $tcp1 $sink1
 
 proc record {} {
-	global sink0 sink1 f0 f1 
+	global sink0 sink1 f0 f1 sum_1 sum_2 count 
 	#Get an instance of the simulator	
 	set ns [Simulator instance]
 	#Set the time after which the procedure should be called 		again	
@@ -78,6 +87,9 @@ proc record {} {
 	#Get the current time
 	set now [$ns now]
 	#Calculate the bandwidth (in MBit/s) and write it to the 		files
+	set sum_1 [expr $sum_1 + $bw0/$time*8/1000000];
+	set sum_2 [expr $sum_2 + $bw1/$time*8/1000000];
+	set count [expr $count + 1];
         puts $f0 "$now [expr $bw0/$time*8/1000000]"
         puts $f1 "$now [expr $bw1/$time*8/1000000]"
 	#Reset the bytes_ values on the traffic sinks
@@ -85,21 +97,20 @@ proc record {} {
         $sink1 set bytes_ 0	
 	#Re-schedule the procedure
         $ns at [expr $now+$time] "record"
-	
 }
 
-$ns at 0.0 "record"
+$ns at 100.0 "record"
 $ns at 0.0 "$ftp0 start"
 $ns at 0.0 "$ftp1 start"
-$ns at 40.0 "$ftp0 stop"
-$ns at 40.0 "$ftp1 stop"
+$ns at 400.0 "$ftp0 stop"
+$ns at 400.0 "$ftp1 stop"
 
 $tcp0 set class_ 1
 $tcp1 set class_ 2
 $ns color 1 Blue
 $ns color 2 Red
 
-$ns at 40.0 "finish"
+$ns at 400.0 "finish"
 
 $ns run
 
