@@ -5,6 +5,7 @@
 
 set ns [new Simulator]
 
+
 set f0 [open src1_[lindex $argv 0]_[lindex $argv 1].tr w]
 set f1 [open src2_[lindex $argv 0]_[lindex $argv 1].tr w]
 
