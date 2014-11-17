@@ -54,24 +54,26 @@ set n5 [$ns node]
 set n6 [$ns node]
 set n7 [$ns node]
 
+set queue "DropTail"
 # Setting RED parameters
 if {[lindex $argv 0] == "RED"} {
+set queue "RED"
 Queue/RED set thresh_ 10
 Queue/RED set maxthresh_ 15
 Queue/RED set linterm_ 50
 } 
-$ns duplex-link $n0 $n2 10Mb 1ms [lindex $argv 0]
-$ns duplex-link $n1 $n2 10Mb 1ms [lindex $argv 0]
-$ns duplex-link $n3 $n2 1Mb 10ms [lindex $argv 0]
-$ns duplex-link $n4 $n3 10Mb 1ms [lindex $argv 0]
-$ns duplex-link $n5 $n3 10Mb 1ms [lindex $argv 0]
+$ns duplex-link $n0 $n2 10Mb 1ms $queue
+$ns duplex-link $n1 $n2 10Mb 1ms $queue
+$ns duplex-link $n3 $n2 1Mb 10ms $queue
+$ns duplex-link $n4 $n3 10Mb 1ms $queue
+$ns duplex-link $n5 $n3 10Mb 1ms $queue
 
 # Queue limit for the link
 $ns queue-limit $n2 $n3 20
 
 if {[lindex $argv 1] == 2} {
-	$ns duplex-link $n6 $n2 10Mb 1ms [lindex $argv 0]
-	$ns duplex-link $n7 $n3 10Mb 1ms [lindex $argv 0]
+	$ns duplex-link $n6 $n2 10Mb 1ms $queue
+	$ns duplex-link $n7 $n3 10Mb 1ms $queue
 
 	#Create a UDP agent and attach it to node n6
 	set udp0 [new Agent/UDP]
