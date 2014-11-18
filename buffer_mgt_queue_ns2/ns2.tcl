@@ -81,7 +81,7 @@ if {[lindex $argv 1] == 2} {
 
 	# Create a CBR traffic source and attach it to udp0
 	set cbr0 [new Application/Traffic/CBR]
-	$cbr0 set packetSize_ 100
+	$cbr0 set PacketSize_ 100
 	$cbr0 set rate_ 1Mb
 	$cbr0 attach-agent $udp0
 
@@ -117,6 +117,17 @@ $ns attach-agent $n5 $sink1
 
 $ns connect $tcp0 $sink0
 $ns connect $tcp1 $sink1
+
+proc init {} {
+	global argv sink0 sink1
+	$sink0 set bytes_ 0
+	$sink1 set bytes_ 0
+	if {[lindex $argv 1] == 2} {
+		global sink2
+		$sink2 set bytes_ 0
+	}
+	
+}
 
 if {[lindex $argv 1] == 1} {
 	proc record {} {
@@ -172,6 +183,7 @@ if {[lindex $argv 1] == 1} {
 	}
 }
 
+$ns at 30.0 "init"
 $ns at 30.0 "record"
 $ns at 0.0 "$ftp0 start"
 $ns at 0.0 "$ftp1 start"
