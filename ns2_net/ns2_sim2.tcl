@@ -99,8 +99,8 @@ $ns duplex-link-op $r1 $src2 orient left
 $ns duplex-link-op $r2 $rec2 orient right
 $ns duplex-link-op $r2 $rec1 orient right-down
 if {[lindex $argv 1] == 2} {
-	$ns duplex-link-op $r1 $src2 orient left-up 
-	$ns duplex-link-op $r2 $rec2 orient right-up
+	$ns duplex-link-op $r1 $src3 orient left-up 
+	$ns duplex-link-op $r2 $rec3 orient right-up
 }
 
 #Create a TCP agent and attach it to node src1
